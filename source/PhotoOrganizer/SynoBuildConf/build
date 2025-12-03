@@ -1,0 +1,11 @@
+#!/bin/bash
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+# Build script - prepares files for packaging
+# Note: Python version check happens on target NAS during installation (preinst script)
+
+# Make Photo_Organizer.py executable
+chmod +x Photo_Organizer.py
+
+echo "Build completed successfully."
+echo "Note: Python 3.7+ and pip3 will be checked/installed on target NAS during package installation."

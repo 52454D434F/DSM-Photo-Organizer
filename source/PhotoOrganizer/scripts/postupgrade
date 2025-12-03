@@ -1,0 +1,115 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### This script will be executed after package upgraded.
+### Actions after package upgraded.
+
+# Load package version
+. "$(dirname "$0")/_version.sh" 2>/dev/null || PACKAGE_VERSION="1.0.1-00001"
+
+# Logging function with multiple fallback methods
+_log_message() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Method 1: Standard logger command (preferred - works via syslog, no file permissions needed)
+    if command -v logger >/dev/null 2>&1; then
+        logger -t PhotoOrganizer -p user.info "$msg" 2>/dev/null || true
+    fi
+    
+    # Method 1b: Synology-specific synologset1 (fallback if logger doesn't work)
+    # Format: synologset1 <facility> <level> <id> <message>
+    # 0x11800000 is a generic system info ID (empty category)
+    if command -v synologset1 >/dev/null 2>&1; then
+        synologset1 sys info 0x11800000 "[Photo Organizer] $msg" 2>/dev/null || true
+    fi
+    
+    # Method 2: Write to package-specific log file (always accessible to package user)
+    local pkg_log_file="$PACKAGE_VAR_DIR/upgrade.log"
+    if [ -n "$PACKAGE_VAR_DIR" ]; then
+        mkdir -p "$PACKAGE_VAR_DIR" 2>/dev/null || true
+        if [ -w "$PACKAGE_VAR_DIR" ]; then
+            echo "[$timestamp] $msg" >> "$pkg_log_file" 2>/dev/null || true
+        fi
+    fi
+    
+    # Note: We don't write to SYNOPKG_TEMP_LOGFILE to avoid cluttering Package Center output
+    # All information is logged to system logs and package log files
+}
+
+# Primary location for run-as: package
+APP_DIR="/var/packages/PhotoOrganizer/target/usr/local/PhotoOrganizer"
+PACKAGE_VAR_DIR="/var/packages/PhotoOrganizer"
+VENV_DIR="$PACKAGE_VAR_DIR/venv"
+
+# Check if /var/packages/PhotoOrganizer is writable, if not use package destination
+# Also check if venv already exists in alternative location
+if [ ! -d "$VENV_DIR" ]; then
+if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
+    if [ -n "$SYNOPKG_PKGDEST" ]; then
+        PACKAGE_VAR_DIR="$SYNOPKG_PKGDEST/var"
+        VENV_DIR="$PACKAGE_VAR_DIR/venv"
+    else
+        PACKAGE_VAR_DIR="$APP_DIR/var"
+        VENV_DIR="$PACKAGE_VAR_DIR/venv"
+        fi
+    fi
+fi
+
+# Ensure package var directory exists
+    mkdir -p "$PACKAGE_VAR_DIR" 2>>$SYNOPKG_TEMP_LOGFILE || true
+
+# Find Python 3.7+
+PYTHON_CMD="python3"
+for py_cmd in python3.12 python3.11 python3.10 python3.9 python3; do
+    if command -v "$py_cmd" > /dev/null 2>&1; then
+        PYTHON_VERSION=$("$py_cmd" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
+        if [ -n "$PYTHON_VERSION" ]; then
+            PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+            PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+            if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 7 ]; then
+                PYTHON_CMD="$py_cmd"
+                break
+            fi
+        fi
+    fi
+done
+
+# Ensure virtual environment exists
+if [ ! -d "$VENV_DIR" ]; then
+    "$PYTHON_CMD" -m venv "$VENV_DIR" >> $SYNOPKG_TEMP_LOGFILE 2>&1
+fi
+
+# Update Python dependencies
+. "$VENV_DIR/bin/activate"
+"$PYTHON_CMD" -m pip install --upgrade pip >> $SYNOPKG_TEMP_LOGFILE 2>&1 || true
+"$PYTHON_CMD" -m pip install --upgrade Pillow>=12.0.0 watchdog imagehash mutagen >> $SYNOPKG_TEMP_LOGFILE 2>&1 || true
+
+# Log dependencies to System.log
+LOG_FILE="$PACKAGE_VAR_DIR/System.log"
+
+PYTHON_VER=$("$PYTHON_CMD" --version 2>&1 | sed 's/Python //')
+PIP_VER=$("$VENV_DIR/bin/python" -m pip --version 2>&1 | head -n1 | sed 's/.*pip \([0-9.]*\).*/\1/')
+PILLOW_VER=$("$VENV_DIR/bin/python" -m pip show Pillow 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+WATCHDOG_VER=$("$VENV_DIR/bin/python" -m pip show watchdog 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+IMAGEHASH_VER=$("$VENV_DIR/bin/python" -m pip show imagehash 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+MUTAGEN_VER=$("$VENV_DIR/bin/python" -m pip show mutagen 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+if [ ! -f "$LOG_FILE" ]; then
+    echo "# Timestamp, Python Version, Pip Version, Pillow Version, Watchdog Version, ImageHash Version, Mutagen Version, Package Version, Installation Path" > "$LOG_FILE"
+fi
+
+echo "$TIMESTAMP, $PYTHON_VER, $PIP_VER, $PILLOW_VER, $WATCHDOG_VER, $IMAGEHASH_VER, $MUTAGEN_VER, $PACKAGE_VERSION, $VENV_DIR" >> "$LOG_FILE"
+
+deactivate
+chmod +x $APP_DIR/Photo_Organizer.py 2>/dev/null || true
+
+# Log to system log (visible in Log Center)
+_log_message "Package upgraded successfully to version $PACKAGE_VERSION"
+_log_message "Python: $PYTHON_VER"
+_log_message "Dependencies updated: Pillow $PILLOW_VER, Watchdog $WATCHDOG_VER, ImageHash $IMAGEHASH_VER, Mutagen $MUTAGEN_VER"
+
+exit 0
+

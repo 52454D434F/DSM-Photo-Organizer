@@ -1,0 +1,41 @@
+[
+	{
+		"step_title": "Folder to monitor",
+		"items": [{
+			"type": "textfield",
+			"desc": "Folder to monitor. This is the folder that will be monitored for new files.",
+			"subitems": [{
+				"key": "UI_SRCDIR",
+				"desc": "/var/services/photo/",
+				"emptyText": "(Root of photo share)",
+				"defaultValue": "Photo Organizer"
+			}]
+		}]
+	},
+	{
+		"step_title": "Destination Folder",
+		"items": [{
+			"type": "textfield",
+			"desc": "Destination folder to store organized and deduplicated files. This is where files are moved to.",
+			"subitems": [{
+				"key": "UI_DSTDIR",
+				"desc": "/var/services/photo/",
+				"emptyText": "(Root of photo share)",
+				"defaultValue": ""
+			}]
+		},
+		{
+			"type": "singleselect",
+			"desc": "Delete duplicate files?",
+			"defaultValue": "UI_DELETE_DUPS",
+			"subitems": [{
+				"key": "UI_DELETE_DUPS",
+				"desc": "Yes, if an MD5 comparison shows files are identical, then delete."
+			},
+			{
+				"key": "no",
+				"desc": "No, move duplicates to the Duplicates folder."
+			}]
+		}]
+	}
+]

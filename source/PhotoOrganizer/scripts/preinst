@@ -1,0 +1,45 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### This script will be executed when package installed and upgraded.
+### Actions before package installed.
+### ex. check environment.
+
+# Find Python 3.7+ (try python3.12, python3.11, python3.10, python3.9, then python3)
+PYTHON_CMD=""
+for py_cmd in python3.12 python3.11 python3.10 python3.9 python3; do
+    if command -v "$py_cmd" > /dev/null 2>&1; then
+        PYTHON_VERSION=$("$py_cmd" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
+        if [ -n "$PYTHON_VERSION" ]; then
+            PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+            PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+            if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 7 ]; then
+                PYTHON_CMD="$py_cmd"
+                break
+            fi
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "ERROR: Python 3.7 or higher is required." >> $SYNOPKG_TEMP_LOGFILE
+        echo "" >> $SYNOPKG_TEMP_LOGFILE
+        echo "Please install Python 3 from Package Center:" >> $SYNOPKG_TEMP_LOGFILE
+        echo "1. Open Package Center on your Synology NAS" >> $SYNOPKG_TEMP_LOGFILE
+        echo "2. Search for 'Python 3' and install it" >> $SYNOPKG_TEMP_LOGFILE
+        echo "3. After installation, try installing this package again" >> $SYNOPKG_TEMP_LOGFILE
+        exit 1
+fi
+
+# Check if venv module is available
+if ! "$PYTHON_CMD" -c "import venv" 2>/dev/null; then
+    echo "WARNING: python3-venv module not found" >> $SYNOPKG_TEMP_LOGFILE
+fi
+
+# Store Python command for use in postinst (via environment or file)
+# We'll use a file since environment variables might not persist
+echo "$PYTHON_CMD" > /tmp/photo_organizer_python_cmd 2>/dev/null || true
+
+
+exit 0
+

@@ -1,0 +1,286 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+# Use package var directory for PID file (package user can write here)
+# Check if /var/packages/PhotoOrganizer/var exists (symlink to /volume1/@appdata/PhotoOrganizer)
+if [ -d "/var/packages/PhotoOrganizer/var" ]; then
+    PID_FILE="/var/packages/PhotoOrganizer/var/photo-organizer.pid"
+else
+    # Fallback to /var/run if var doesn't exist (may require permissions)
+PID_FILE="/var/run/photo-organizer.pid"
+fi
+
+# Primary location for run-as: package
+APP_DIR="/var/packages/PhotoOrganizer/target/usr/local/PhotoOrganizer"
+VENV_BASE_DIR="/var/packages/PhotoOrganizer"
+VENV_DIR="$VENV_BASE_DIR/venv"
+
+# Check if /var/packages/PhotoOrganizer is writable, if not use package destination
+# This matches the logic in postinst to ensure we use the same venv location
+if [ ! -d "$VENV_BASE_DIR" ] || [ ! -w "$VENV_BASE_DIR" ]; then
+    if [ -n "$SYNOPKG_PKGDEST" ]; then
+        VENV_BASE_DIR="$SYNOPKG_PKGDEST/var"
+        VENV_DIR="$VENV_BASE_DIR/venv"
+    else
+        VENV_BASE_DIR="$APP_DIR/var"
+        VENV_DIR="$VENV_BASE_DIR/venv"
+    fi
+fi
+
+SCRIPT_PATH="$APP_DIR/Photo_Organizer.py"
+if [ ! -f "$SCRIPT_PATH" ]; then
+    SCRIPT_PATH="/volume1/@appstore/PhotoOrganizer/usr/local/PhotoOrganizer/Photo_Organizer.py"
+fi
+
+# Use the venv Python from the same location determined above
+VENV_PYTHON="$VENV_DIR/bin/python"
+if [ ! -f "$VENV_PYTHON" ]; then
+    # Fallback to system Python if venv not found
+    VENV_PYTHON="python3"
+fi
+
+    LOG_FILE="/var/packages/PhotoOrganizer/photo-organizer.log"
+
+# Determine package var directory for logging
+# On DSM, /var/packages/PhotoOrganizer/var is a symlink to /volume1/@appdata/PhotoOrganizer
+PACKAGE_VAR_DIR="/var/packages/PhotoOrganizer/var"
+if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
+    # Try the symlink target directly
+    if [ -L "/var/packages/PhotoOrganizer/var" ]; then
+        PACKAGE_VAR_DIR=$(readlink -f "/var/packages/PhotoOrganizer/var" 2>/dev/null || echo "/var/packages/PhotoOrganizer/var")
+    fi
+    # Fallback to target/var
+    if [ ! -w "$PACKAGE_VAR_DIR" ]; then
+        PACKAGE_VAR_DIR="/var/packages/PhotoOrganizer/target/var"
+    fi
+    # Final fallback
+    if [ ! -w "$PACKAGE_VAR_DIR" ]; then
+        PACKAGE_VAR_DIR="/var/packages/PhotoOrganizer"
+    fi
+fi
+
+# Logging function with multiple fallback methods
+_log_message() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Method 1: Standard logger command (preferred - works via syslog, no file permissions needed)
+    if command -v logger >/dev/null 2>&1; then
+        logger -t PhotoOrganizer -p user.info "$msg" 2>/dev/null || true
+    fi
+    
+    # Method 1b: Synology-specific synologset1 (fallback if logger doesn't work)
+    # Format: synologset1 <facility> <level> <id> <message>
+    # 0x11800000 is a generic system info ID (empty category)
+    if command -v synologset1 >/dev/null 2>&1; then
+        synologset1 sys info 0x11800000 "[Photo Organizer] $msg" 2>/dev/null || true
+    fi
+    
+    # Method 2: Write to package-specific log file (always accessible to package user)
+    local pkg_log_file="$PACKAGE_VAR_DIR/service.log"
+    if [ -n "$PACKAGE_VAR_DIR" ] && [ -w "$PACKAGE_VAR_DIR" ]; then
+        echo "[$timestamp] $msg" >> "$pkg_log_file" 2>/dev/null || true
+    fi
+    
+    # Note: We don't write to SYNOPKG_TEMP_LOGFILE to avoid cluttering Package Center output
+    # All information is logged to system logs and package log files
+}
+
+case $1 in
+	start)
+		if [ -f "$PID_FILE" ]; then
+			OLD_PID=$(cat "$PID_FILE")
+			if ps -p "$OLD_PID" > /dev/null 2>&1; then
+				# Verify it's actually our script
+				if ps -p "$OLD_PID" -o args= 2>/dev/null | grep -q "Photo_Organizer.py"; then
+				echo "Photo Organizer is already running (PID: $OLD_PID)" > $SYNOPKG_TEMP_LOGFILE
+				exit 0
+				fi
+			fi
+			rm -f "$PID_FILE"
+		fi
+		
+		# Verify script and Python exist
+		if [ ! -f "$SCRIPT_PATH" ]; then
+			echo "ERROR: Script not found: $SCRIPT_PATH" > $SYNOPKG_TEMP_LOGFILE
+				exit 1
+		fi
+		
+		if [ ! -f "$VENV_PYTHON" ]; then
+			echo "ERROR: Python interpreter not found: $VENV_PYTHON" > $SYNOPKG_TEMP_LOGFILE
+			exit 1
+		fi
+		
+		# Ensure log directory exists and is writable
+		LOG_DIR="$(dirname "$LOG_FILE")"
+		if [ ! -d "$LOG_DIR" ]; then
+			mkdir -p "$LOG_DIR" 2>/dev/null || {
+				# Try alternative log location
+				LOG_FILE="/tmp/photo-organizer.log"
+				LOG_DIR="/tmp"
+			}
+		fi
+		
+		# Test if log file is writable
+		if ! touch "$LOG_FILE" 2>/dev/null; then
+			LOG_FILE="/tmp/photo-organizer.log"
+			LOG_DIR="/tmp"
+		fi
+		
+		# Start the process and capture PID
+		"$VENV_PYTHON" -u "$SCRIPT_PATH" >> "$LOG_FILE" 2>&1 &
+		START_PID=$!
+		
+		# Wait a moment for the process to start
+		sleep 2
+		
+		# Find the actual Python process (in case of shell wrapper)
+		# Use ps + grep instead of pgrep (pgrep may not be available)
+		ACTUAL_PID=$(ps aux 2>/dev/null | grep -v grep | grep "Photo_Organizer.py" | awk '{print $2}' | head -n 1)
+		
+		# If we found it by name, use that; otherwise use the start PID
+		if [ -n "$ACTUAL_PID" ] && [ "$ACTUAL_PID" != "$$" ]; then
+			PID=$ACTUAL_PID
+		else
+			# Check if start PID is still valid and is our script
+			if ps -p "$START_PID" > /dev/null 2>&1; then
+				if ps -p "$START_PID" -o args= 2>/dev/null | grep -q "Photo_Organizer.py"; then
+					PID=$START_PID
+				fi
+			fi
+		fi
+		
+		# If we have a valid PID, save it
+		if [ -n "$PID" ] && ps -p "$PID" > /dev/null 2>&1; then
+			# Ensure PID file directory exists and is writable
+			PID_DIR="$(dirname "$PID_FILE")"
+			if [ ! -d "$PID_DIR" ]; then
+				mkdir -p "$PID_DIR" 2>/dev/null || {
+					# Fallback to /tmp if we can't create the directory
+					PID_FILE="/tmp/photo-organizer.pid"
+				}
+			fi
+			# Try to write PID file, fallback to /tmp if permission denied
+			if ! echo $PID > "$PID_FILE" 2>/dev/null; then
+				PID_FILE="/tmp/photo-organizer.pid"
+				echo $PID > "$PID_FILE" 2>/dev/null || true
+			fi
+			_log_message "Service started successfully (PID: $PID)"
+			exit 0
+			else
+			# Process didn't start or exited immediately - check the log
+			_log_message "ERROR: Failed to start service"
+			echo "ERROR: Failed to start Photo Organizer" > $SYNOPKG_TEMP_LOGFILE
+			echo "Log file location: $LOG_FILE" >> $SYNOPKG_TEMP_LOGFILE
+			echo "Script path: $SCRIPT_PATH" >> $SYNOPKG_TEMP_LOGFILE
+			echo "Python path: $VENV_PYTHON" >> $SYNOPKG_TEMP_LOGFILE
+			if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+				echo "" >> $SYNOPKG_TEMP_LOGFILE
+				echo "Last 30 lines of log:" >> $SYNOPKG_TEMP_LOGFILE
+				tail -n 30 "$LOG_FILE" >> $SYNOPKG_TEMP_LOGFILE 2>&1 || true
+			else
+				echo "" >> $SYNOPKG_TEMP_LOGFILE
+				echo "Log file is empty or doesn't exist." >> $SYNOPKG_TEMP_LOGFILE
+				echo "The script may have exited before writing to the log." >> $SYNOPKG_TEMP_LOGFILE
+				echo "Check if Python dependencies are installed:" >> $SYNOPKG_TEMP_LOGFILE
+				"$VENV_PYTHON" -c "import PIL; import watchdog; import imagehash; import mutagen; print('Dependencies OK')" >> $SYNOPKG_TEMP_LOGFILE 2>&1 || echo "Dependencies check failed" >> $SYNOPKG_TEMP_LOGFILE
+			fi
+			rm -f "$PID_FILE"
+			exit 1
+		fi
+	;;
+	stop)
+		if [ ! -f "$PID_FILE" ]; then
+			echo "Photo Organizer is not running" > $SYNOPKG_TEMP_LOGFILE
+			exit 0
+		fi
+		
+		PID=$(cat "$PID_FILE")
+		if ps -p "$PID" > /dev/null 2>&1; then
+			kill "$PID"
+			for i in 1 2 3 4 5; do
+				if ! ps -p "$PID" > /dev/null 2>&1; then
+					break
+				fi
+				sleep 1
+			done
+			if ps -p "$PID" > /dev/null 2>&1; then
+				kill -9 "$PID"
+			fi
+		fi
+		rm -f "$PID_FILE"
+		_log_message "Service stopped"
+		# echo "Photo Organizer stopped" > $SYNOPKG_TEMP_LOGFILE
+		exit 0
+	;;
+	status)
+		if [ ! -f "$PID_FILE" ]; then
+			exit 1
+		fi
+		PID=$(cat "$PID_FILE" 2>/dev/null)
+		if [ -z "$PID" ] || ! ps -p "$PID" > /dev/null 2>&1; then
+			rm -f "$PID_FILE"
+			exit 1
+		fi
+		exit 0
+	;;
+	debug)
+		### Debug information
+		echo "=== Photo Organizer Debug Information ==="
+		echo ""
+		echo "1. PID File:"
+		if [ -f "$PID_FILE" ]; then
+			PID=$(cat "$PID_FILE" 2>/dev/null)
+			echo "  PID: $PID"
+		if ps -p "$PID" > /dev/null 2>&1; then
+				echo "  Status: Running"
+				ps -p "$PID" -o args= 2>/dev/null | head -n 1
+			else
+				echo "  Status: NOT running (stale PID)"
+			fi
+		else
+			echo "  PID file not found"
+		fi
+		echo ""
+		echo "2. Python Process:"
+		PYTHON_PROC=$(ps aux 2>/dev/null | grep -v grep | grep "Photo_Organizer.py" | awk '{print $2}' | head -n 1)
+		if [ -n "$PYTHON_PROC" ]; then
+			echo "  Found process: $PYTHON_PROC"
+			ps -p "$PYTHON_PROC" -o pid,user,args= 2>/dev/null || true
+		else
+			echo "  No Photo_Organizer.py process found"
+		fi
+		echo ""
+		echo "3. Script Location:"
+		if [ -f "$SCRIPT_PATH" ]; then
+			echo "  Found: $SCRIPT_PATH"
+			ls -la "$SCRIPT_PATH" 2>/dev/null | awk '{print "  " $0}'
+		else
+			echo "  NOT FOUND: $SCRIPT_PATH"
+		fi
+		echo ""
+		echo "4. Python Interpreter:"
+		if [ -f "$VENV_PYTHON" ]; then
+			echo "  Found: $VENV_PYTHON"
+			"$VENV_PYTHON" --version 2>&1 | sed 's/^/  /'
+		else
+			echo "  NOT FOUND: $VENV_PYTHON"
+		fi
+		echo ""
+		echo "5. Log File (last 30 lines):"
+		if [ -f "$LOG_FILE" ]; then
+			tail -n 30 "$LOG_FILE" 2>/dev/null | sed 's/^/  /' || echo "  Could not read log file"
+		else
+			echo "  Log file not found: $LOG_FILE"
+		fi
+		echo ""
+		echo "6. Dependencies Test:"
+		if [ -f "$VENV_PYTHON" ]; then
+			"$VENV_PYTHON" -c "import PIL; import watchdog; import imagehash; import mutagen; print('  All dependencies OK')" 2>&1 | sed 's/^/  /' || echo "  Dependencies missing or error"
+		else
+			echo "  Cannot test - Python not found"
+		fi
+		echo ""
+		exit 0
+	;;
+esac

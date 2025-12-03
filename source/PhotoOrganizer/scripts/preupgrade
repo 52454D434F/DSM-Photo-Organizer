@@ -1,0 +1,14 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### This script will be executed before package upgraded.
+### Actions before package upgraded.
+
+# Stop the service before upgrading
+if [ -f /var/run/photo-organizer.pid ]; then
+    /var/packages/PhotoOrganizer/target/scripts/start-stop-status stop 2>/dev/null || \
+    /var/packages/PhotoOrganizer/scripts/start-stop-status stop 2>/dev/null || true
+fi
+
+exit 0
+

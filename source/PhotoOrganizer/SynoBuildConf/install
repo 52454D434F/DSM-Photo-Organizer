@@ -1,0 +1,227 @@
+#!/bin/bash
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### Use PKG_DIR as working directory.
+PKG_DIR=/tmp/_test_spk
+rm -rf $PKG_DIR
+mkdir -p $PKG_DIR
+
+### get spk packing functions
+source /pkgscripts/include/pkg_util.sh
+
+create_package_tgz() {
+	local package_tgz_dir=/tmp/_package_tgz
+	local app_dir=$package_tgz_dir/usr/local/PhotoOrganizer
+	local bin_dir=$package_tgz_dir/usr/local/bin
+
+	### clear destination directory
+	rm -rf $package_tgz_dir && mkdir -p $package_tgz_dir
+
+	### install application files
+	mkdir -p $app_dir
+	mkdir -p $bin_dir
+	
+	# Copy main Python script (this is required - ensures directory is created)
+	if [ ! -f "Photo_Organizer.py" ]; then
+		echo "Error: Photo_Organizer.py not found in source directory" >&2
+		exit 1
+	fi
+	cp -av Photo_Organizer.py $app_dir/
+	chmod +x $app_dir/Photo_Organizer.py
+	
+	# Verify the file was copied
+	if [ ! -f "$app_dir/Photo_Organizer.py" ]; then
+		echo "Error: Failed to copy Photo_Organizer.py to $app_dir" >&2
+		exit 1
+	fi
+	
+	# Copy requirements.txt (for reference, dependencies installed in venv)
+	cp -av requirements.txt $app_dir/ 2>/dev/null || true
+	
+	# Copy VERSION file (for runtime version reading)
+	cp -av VERSION $app_dir/ 2>/dev/null || true
+	
+	# Copy README if exists
+	cp -av README.md $app_dir/ 2>/dev/null || true
+	
+	# Create a .keep file to ensure the directory is definitely in the package
+	# This ensures the directory exists even if all other files fail to copy
+	echo "Package installation marker" > $app_dir/.keep
+	chmod 644 $app_dir/.keep
+	
+	# Verify directory was created and has files
+	if [ ! -d "$app_dir" ]; then
+		echo "Error: Application directory was not created: $app_dir" >&2
+		exit 1
+	fi
+	
+	# Verify at least one file exists (Photo_Organizer.py should always be there)
+	if [ ! -f "$app_dir/Photo_Organizer.py" ] && [ ! -f "$app_dir/.keep" ]; then
+		echo "Error: No files found in application directory: $app_dir" >&2
+		echo "Directory contents:" >&2
+		ls -la $app_dir/ >&2 || true
+		exit 1
+	fi
+	
+	echo "Successfully created application directory with files: $app_dir" >&2
+	ls -la $app_dir/ >&2 || true
+	
+	# Verify the directory structure will be preserved in the package
+	# by checking the parent directory structure
+	if [ ! -d "$(dirname "$app_dir")" ]; then
+		echo "Error: Parent directory does not exist: $(dirname "$app_dir")" >&2
+		exit 1
+	fi
+	
+	# Note: Virtual environment will be created during package installation (postinst)
+	# The venv will be created at /var/packages/PhotoOrganizer/venv/ (package user has write permissions there)
+	
+	# Create symlink for easy access
+	ln -sf /usr/local/PhotoOrganizer/Photo_Organizer.py $bin_dir/photo-organizer
+
+	### Verify package structure before creating package.tgz
+	echo "Verifying package structure..." >&2
+	if [ ! -d "$app_dir" ]; then
+		echo "Error: Application directory missing: $app_dir" >&2
+		exit 1
+	fi
+	if [ ! -f "$app_dir/Photo_Organizer.py" ]; then
+		echo "Error: Photo_Organizer.py missing from package" >&2
+		exit 1
+	fi
+	echo "Package structure verified. Files in $app_dir:" >&2
+	ls -la "$app_dir/" >&2 || true
+	
+	### create package.tgz
+	pkg_make_package $package_tgz_dir "${PKG_DIR}"
+	
+	### Verify package.tgz was created
+	if [ ! -f "${PKG_DIR}/package.tgz" ]; then
+		echo "Error: package.tgz was not created" >&2
+		exit 1
+	fi
+	echo "Package tarball created successfully: ${PKG_DIR}/package.tgz" >&2
+}
+
+create_spk(){
+	# Ensure we're in the package source directory
+	# The install script should be run from the package source directory by SynoInstall
+	PACKAGE_DIR="$(pwd)"
+	
+	cp -av scripts $PKG_DIR/scripts
+	cp -av conf $PKG_DIR/conf
+	cp -av LICENSE $PKG_DIR 2>/dev/null || true
+	
+	# Verify wizard file was copied
+	if [ ! -f "$PKG_DIR/conf/wizard" ]; then
+		echo "ERROR: Wizard file not found in package directory!" >&2
+		exit 1
+	fi
+	echo "Wizard file verified: $PKG_DIR/conf/wizard" >&2
+	
+	# Copy package icons - prioritize new icon files over old PACKAGE_ICON files
+	# Always use icon.png and icon_256.png if they exist, otherwise fall back to PACKAGE_ICON files
+	# Force copy to ensure icons are updated (DSM caches icons per version, so version increment helps)
+	ICON_COPIED=false
+	if [ -f "icon.png" ]; then
+		# Use cp with -f to force overwrite and update timestamps
+		cp -af icon.png $PKG_DIR/PACKAGE_ICON.PNG
+		# Touch to ensure timestamp is updated (helps with DSM caching)
+		touch $PKG_DIR/PACKAGE_ICON.PNG
+		ICON_COPIED=true
+		echo "Using icon.png for PACKAGE_ICON.PNG" >&2
+		echo "Icon size: $(stat -c%s $PKG_DIR/PACKAGE_ICON.PNG 2>/dev/null || stat -f%z $PKG_DIR/PACKAGE_ICON.PNG 2>/dev/null || echo 'unknown') bytes" >&2
+	elif [ -f "PACKAGE_ICON.PNG" ]; then
+		cp -af PACKAGE_ICON.PNG $PKG_DIR/
+		touch $PKG_DIR/PACKAGE_ICON.PNG
+		ICON_COPIED=true
+		echo "Using PACKAGE_ICON.PNG (icon.png not found)" >&2
+	fi
+	
+	if [ "$ICON_COPIED" = false ]; then
+		echo "Warning: No icon file found (neither icon.png nor PACKAGE_ICON.PNG)" >&2
+	fi
+	
+	ICON_256_COPIED=false
+	if [ -f "icon_256.png" ]; then
+		# Use cp with -f to force overwrite and update timestamps
+		cp -af icon_256.png $PKG_DIR/PACKAGE_ICON_256.PNG
+		# Touch to ensure timestamp is updated (helps with DSM caching)
+		touch $PKG_DIR/PACKAGE_ICON_256.PNG
+		ICON_256_COPIED=true
+		echo "Using icon_256.png for PACKAGE_ICON_256.PNG" >&2
+		echo "Icon 256 size: $(stat -c%s $PKG_DIR/PACKAGE_ICON_256.PNG 2>/dev/null || stat -f%z $PKG_DIR/PACKAGE_ICON_256.PNG 2>/dev/null || echo 'unknown') bytes" >&2
+	elif [ -f "PACKAGE_ICON_256.PNG" ]; then
+		cp -af PACKAGE_ICON_256.PNG $PKG_DIR/
+		touch $PKG_DIR/PACKAGE_ICON_256.PNG
+		ICON_256_COPIED=true
+		echo "Using PACKAGE_ICON_256.PNG (icon_256.png not found)" >&2
+	fi
+	
+	if [ "$ICON_256_COPIED" = false ]; then
+		echo "Warning: No 256x256 icon file found (neither icon_256.png nor PACKAGE_ICON_256.PNG)" >&2
+	fi
+	
+	# Verify icons were copied
+	if [ ! -f "$PKG_DIR/PACKAGE_ICON.PNG" ]; then
+		echo "Error: PACKAGE_ICON.PNG was not created in package directory" >&2
+		exit 1
+	fi
+	if [ ! -f "$PKG_DIR/PACKAGE_ICON_256.PNG" ]; then
+		echo "Error: PACKAGE_ICON_256.PNG was not created in package directory" >&2
+		exit 1
+	fi
+	
+	# Log icon file info for debugging
+	echo "Icons copied successfully. Version increment will help DSM refresh cache." >&2
+
+	# Generate INFO file - must be in source directory for package collection phase
+	# The package system looks for INFO at: /source/PhotoOrganizer/INFO
+	if [ ! -f "INFO.sh" ]; then
+		echo "Error: INFO.sh not found in $PACKAGE_DIR" >&2
+		echo "Current directory: $(pwd)" >&2
+		echo "Looking for INFO.sh..." >&2
+		find . -name "INFO.sh" 2>/dev/null || echo "INFO.sh not found anywhere" >&2
+		exit 1
+	fi
+	
+	chmod +x INFO.sh
+	bash INFO.sh > INFO
+	INFO_EXIT_CODE=$?
+	
+	if [ $INFO_EXIT_CODE -ne 0 ]; then
+		echo "Error: INFO.sh failed with exit code $INFO_EXIT_CODE" >&2
+		exit 1
+	fi
+	
+	if [ ! -f "INFO" ]; then
+		echo "Error: INFO file was not created" >&2
+		echo "Current directory: $(pwd)" >&2
+		echo "INFO.sh exit code: $INFO_EXIT_CODE" >&2
+		exit 1
+	fi
+	
+	# Verify INFO file has content
+	if [ ! -s "INFO" ]; then
+		echo "Error: INFO file is empty" >&2
+		exit 1
+	fi
+	
+	# Copy INFO to PKG_DIR for the SPK package
+	cp INFO $PKG_DIR/INFO
+	if [ ! -f "$PKG_DIR/INFO" ]; then
+		echo "Error: Failed to copy INFO file to $PKG_DIR" >&2
+		exit 1
+	fi
+
+	### Create the final spk.
+	mkdir -p /image/packages
+	pkg_make_spk ${PKG_DIR} "/image/packages" $(pkg_get_spk_family_name)
+}
+
+main() {
+	create_package_tgz
+	create_spk
+}
+
+main "$@"

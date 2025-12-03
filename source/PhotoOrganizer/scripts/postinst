@@ -1,0 +1,248 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### This script will be executed when package installed and upgraded.
+### Actions after package installed.
+### ex. create database, create symbolic link...
+
+# Primary location for run-as: package
+APP_DIR="/var/packages/PhotoOrganizer/target/usr/local/PhotoOrganizer"
+PACKAGE_VAR_DIR="/var/packages/PhotoOrganizer"
+VENV_DIR="$PACKAGE_VAR_DIR/venv"
+
+# Check if /var/packages/PhotoOrganizer is writable, if not use package destination
+if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
+    if [ -n "$SYNOPKG_PKGDEST" ]; then
+        PACKAGE_VAR_DIR="$SYNOPKG_PKGDEST/var"
+        VENV_DIR="$PACKAGE_VAR_DIR/venv"
+    else
+        PACKAGE_VAR_DIR="$APP_DIR/var"
+        VENV_DIR="$PACKAGE_VAR_DIR/venv"
+    fi
+fi
+
+# Logging function with multiple fallback methods
+_log_message() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Method 1: Standard logger command (preferred - works via syslog, no file permissions needed)
+    if command -v logger >/dev/null 2>&1; then
+        logger -t PhotoOrganizer -p user.info "$msg" 2>/dev/null || true
+    fi
+    
+    # Method 1b: Synology-specific synologset1 (fallback if logger doesn't work)
+    # Format: synologset1 <facility> <level> <id> <message>
+    # 0x11800000 is a generic system info ID (empty category)
+    if command -v synologset1 >/dev/null 2>&1; then
+        synologset1 sys info 0x11800000 "[Photo Organizer] $msg" 2>/dev/null || true
+fi
+
+    # Method 2: Write to package-specific log file (always accessible to package user)
+    # On DSM, /var/packages/PhotoOrganizer/var is a symlink to /volume1/@appdata/PhotoOrganizer
+    local pkg_log_file="/var/packages/PhotoOrganizer/var/install.log"
+    # Try the symlink location first
+    if [ -L "/var/packages/PhotoOrganizer/var" ] || [ -d "/var/packages/PhotoOrganizer/var" ]; then
+        mkdir -p "/var/packages/PhotoOrganizer/var" 2>/dev/null || true
+        if [ -w "/var/packages/PhotoOrganizer/var" ]; then
+            echo "[$timestamp] $msg" >> "$pkg_log_file" 2>/dev/null || true
+        fi
+    fi
+    # Fallback to PACKAGE_VAR_DIR if var symlink doesn't work
+    if [ -n "$PACKAGE_VAR_DIR" ] && [ "$PACKAGE_VAR_DIR" != "/var/packages/PhotoOrganizer/var" ]; then
+        local alt_log_file="$PACKAGE_VAR_DIR/install.log"
+        mkdir -p "$PACKAGE_VAR_DIR" 2>/dev/null || true
+        if [ -w "$PACKAGE_VAR_DIR" ]; then
+            echo "[$timestamp] $msg" >> "$alt_log_file" 2>/dev/null || true
+        fi
+    fi
+    
+    # Note: We don't write to SYNOPKG_TEMP_LOGFILE to avoid cluttering Package Center output
+    # All information is logged to system logs and package log files
+}
+
+# Load package version
+. "$(dirname "$0")/_version.sh" 2>/dev/null || PACKAGE_VERSION="1.0.1-00001"
+
+# Log installation start to system log
+
+_log_message "Starting installation: Package version $PACKAGE_VERSION"
+_log_message "Installation path: $APP_DIR"
+_log_message "Virtual environment: $VENV_DIR"
+
+# Create package var directory for venv
+    mkdir -p "$PACKAGE_VAR_DIR" 2>>$SYNOPKG_TEMP_LOGFILE || {
+        echo "ERROR: Failed to create directory: $PACKAGE_VAR_DIR" >> $SYNOPKG_TEMP_LOGFILE
+    _log_message "ERROR: Failed to create directory: $PACKAGE_VAR_DIR"
+        exit 1
+    }
+
+# Set permissions on application directory
+chmod 755 "$APP_DIR" 2>/dev/null || true
+
+# ----------------------------------------------------------------------
+# Apply wizard settings: source/destination folders and duplicate policy
+# ----------------------------------------------------------------------
+
+# Photo share root (volume-based path)
+PHOTO_ROOT="/volume1/photo"
+
+# Folder to monitor (relative to PHOTO_ROOT), default "Photo Organizer"
+SRC_SUBDIR="${wizard_UI_SRCDIR:-Photo Organizer}"
+SRC_SUBDIR="$(echo "$SRC_SUBDIR" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
+if [ -n "$SRC_SUBDIR" ]; then
+	SRC_DIR="${PHOTO_ROOT}/${SRC_SUBDIR}"
+else
+	SRC_DIR="${PHOTO_ROOT}"
+fi
+
+# Destination folder (relative to PHOTO_ROOT), default root if empty
+DST_SUBDIR="${wizard_UI_DSTDIR:-}"
+DST_SUBDIR="$(echo "$DST_SUBDIR" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
+if [ -n "$DST_SUBDIR" ]; then
+	DEST_DIR="${PHOTO_ROOT}/${DST_SUBDIR}"
+else
+	DEST_DIR="${PHOTO_ROOT}"
+fi
+
+# Duplicate handling
+DELETE_DUPS_RAW="${wizard_UI_DELETE_DUPS:-UI_DELETE_DUPS}"
+if [ "$DELETE_DUPS_RAW" = "no" ]; then
+	DELETE_DUPS="false"
+else
+	DELETE_DUPS="true"
+fi
+
+# Create the chosen directories (monitor + destination + Duplicates)
+mkdir -p "$SRC_DIR" 2>/dev/null || true
+mkdir -p "$DEST_DIR" 2>/dev/null || true
+mkdir -p "${DEST_DIR}/Duplicates" 2>/dev/null || true
+
+# Persist runtime configuration for the Python service
+CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
+{
+	echo "[paths]"
+	echo "source_dir=$SRC_DIR"
+	echo "destination_root=$DEST_DIR"
+	echo ""
+	echo "[duplicates]"
+	echo "delete=$DELETE_DUPS"
+} > "$CONFIG_FILE" 2>/dev/null || true
+
+    PACKAGE_USER="PhotoOrganizer"
+
+# NOTE ABOUT PERMISSIONS
+# ----------------------
+# We no longer attempt to modify ACLs automatically with synoacltool because it
+# can generate confusing "Access deny ACL version" messages during install.
+# Instead, please ensure the Photoorganizer user has at least Read/Write access
+# to the "photo" shared folder via:
+#   Control Panel > Shared Folder > photo > Edit > Permissions > System internal user
+# and set the "Photoorganizer" user to "Read/Write" or "No access" as needed.
+
+# Set permissions on main script
+if [ -f "$APP_DIR/Photo_Organizer.py" ]; then
+    chmod +x $APP_DIR/Photo_Organizer.py
+fi
+
+# Get Python command from preinst
+if [ -f "/tmp/photo_organizer_python_cmd" ]; then
+    PYTHON_CMD=$(cat /tmp/photo_organizer_python_cmd)
+    rm -f /tmp/photo_organizer_python_cmd
+else
+    PYTHON_CMD="python3"
+fi
+
+# Create virtual environment
+if [ -d "$VENV_DIR" ]; then
+    rm -rf "$VENV_DIR"
+fi
+
+"$PYTHON_CMD" -m venv "$VENV_DIR" >> $SYNOPKG_TEMP_LOGFILE 2>&1
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to create virtual environment" >> $SYNOPKG_TEMP_LOGFILE
+    _log_message "ERROR: Failed to create virtual environment"
+    exit 1
+fi
+_log_message "Virtual environment created successfully"
+
+# Activate virtual environment and install dependencies
+. "$VENV_DIR/bin/activate"
+
+# Upgrade pip (suppress normal output; we only care if it fails badly)
+"$PYTHON_CMD" -m pip install --upgrade pip >/dev/null 2>&1 || true
+
+# Install dependencies - try multiple methods for Pillow
+PILLOW_OUTPUT=$("$PYTHON_CMD" -m pip install --only-binary :all: --upgrade Pillow 2>&1)
+PILLOW_EXIT=$?
+if [ $PILLOW_EXIT -ne 0 ]; then
+    PILLOW_OUTPUT=$("$PYTHON_CMD" -m pip install --upgrade Pillow 2>&1)
+    PILLOW_EXIT=$?
+fi
+if [ $PILLOW_EXIT -ne 0 ]; then
+    PILLOW_OUTPUT=$("$PYTHON_CMD" -m pip install --only-binary :all: Pillow==10.0.0 2>&1)
+    PILLOW_EXIT=$?
+fi
+
+if [ $PILLOW_EXIT -ne 0 ]; then
+    echo "ERROR: Pillow installation failed" >> $SYNOPKG_TEMP_LOGFILE
+    echo "$PILLOW_OUTPUT" >> $SYNOPKG_TEMP_LOGFILE
+    echo "" >> $SYNOPKG_TEMP_LOGFILE
+    echo "SOLUTION: Install system libraries via SSH:" >> $SYNOPKG_TEMP_LOGFILE
+    echo "  sudo apt-get update && sudo apt-get install -y libjpeg-dev zlib1g-dev gcc make python3-dev" >> $SYNOPKG_TEMP_LOGFILE
+    _log_message "ERROR: Pillow installation failed"
+    deactivate
+    exit 1
+fi
+
+# Install remaining dependencies (suppress normal pip chatter)
+if ! "$PYTHON_CMD" -m pip install watchdog >/dev/null 2>&1; then
+    echo "ERROR: Failed to install watchdog" >> $SYNOPKG_TEMP_LOGFILE
+    _log_message "ERROR: Failed to install watchdog"
+    deactivate
+    exit 1
+fi
+
+if ! "$PYTHON_CMD" -m pip install imagehash >/dev/null 2>&1; then
+    echo "ERROR: Failed to install imagehash" >> $SYNOPKG_TEMP_LOGFILE
+    _log_message "ERROR: Failed to install imagehash"
+    deactivate
+    exit 1
+fi
+
+if ! "$PYTHON_CMD" -m pip install mutagen >/dev/null 2>&1; then
+    echo "ERROR: Failed to install mutagen" >> $SYNOPKG_TEMP_LOGFILE
+    _log_message "ERROR: Failed to install mutagen"
+    deactivate
+    exit 1
+fi
+
+# Log installed dependencies to System.log
+LOG_FILE="$PACKAGE_VAR_DIR/System.log"
+
+PYTHON_VER=$("$PYTHON_CMD" --version 2>&1 | sed 's/Python //')
+PIP_VER=$("$VENV_DIR/bin/python" -m pip --version 2>&1 | head -n1 | sed 's/.*pip \([0-9.]*\).*/\1/')
+PILLOW_VER=$("$VENV_DIR/bin/python" -m pip show Pillow 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+WATCHDOG_VER=$("$VENV_DIR/bin/python" -m pip show watchdog 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+IMAGEHASH_VER=$("$VENV_DIR/bin/python" -m pip show imagehash 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+MUTAGEN_VER=$("$VENV_DIR/bin/python" -m pip show mutagen 2>/dev/null | grep "^Version:" | sed 's/Version: //' || echo "N/A")
+
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+if [ ! -f "$LOG_FILE" ]; then
+    echo "# Timestamp, Python Version, Pip Version, Pillow Version, Watchdog Version, ImageHash Version, Mutagen Version, Package Version, Installation Path" > "$LOG_FILE"
+fi
+
+echo "$TIMESTAMP, $PYTHON_VER, $PIP_VER, $PILLOW_VER, $WATCHDOG_VER, $IMAGEHASH_VER, $MUTAGEN_VER, $PACKAGE_VERSION, $VENV_DIR" >> "$LOG_FILE"
+
+deactivate
+
+# Log to system log (visible in Log Center)
+_log_message "Package version: $PACKAGE_VERSION | Python: $PYTHON_VER"
+_log_message "Dependencies installed: Pillow $PILLOW_VER, Watchdog $WATCHDOG_VER, ImageHash $IMAGEHASH_VER, Mutagen $MUTAGEN_VER"
+_log_message "Source directory: $SRC_DIR | Destination directory: $DEST_DIR | Delete duplicates: $DELETE_DUPS"
+#_log_message "Installation path: $APP_DIR | Virtual environment: $VENV_DIR"
+_log_message "Installation completed successfully"
+
+exit 0
+

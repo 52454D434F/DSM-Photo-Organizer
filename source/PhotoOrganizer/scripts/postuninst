@@ -1,0 +1,68 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### This script will be executed after package uninstalled.
+### Actions after package uninstalled.
+
+# Logging function with multiple fallback methods
+_log_message() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Method 1: Standard logger command (preferred - works via syslog, no file permissions needed)
+    if command -v logger >/dev/null 2>&1; then
+        logger -t PhotoOrganizer -p user.info "$msg" 2>/dev/null || true
+    fi
+    
+    # Method 1b: Synology-specific synologset1 (fallback if logger doesn't work)
+    # Format: synologset1 <facility> <level> <id> <message>
+    # 0x11800000 is a generic system info ID (empty category)
+    if command -v synologset1 >/dev/null 2>&1; then
+        synologset1 sys info 0x11800000 "[Photo Organizer] $msg" 2>/dev/null || true
+    fi
+    
+    # Method 2: Write to package-specific log file (always accessible to package user)
+    local pkg_log_file="/var/packages/PhotoOrganizer/uninstall.log"
+    if [ -w "/var/packages/PhotoOrganizer" ]; then
+        echo "[$timestamp] $msg" >> "$pkg_log_file" 2>/dev/null || true
+    fi
+    
+    # Note: We don't write to SYNOPKG_TEMP_LOGFILE to avoid cluttering Package Center output
+    # All information is logged to system logs and package log files
+}
+
+# Log uninstallation start
+_log_message "Starting uninstallation"
+    
+# Clean up PID file
+rm -f /var/run/photo-organizer.pid
+
+# Remove virtual environment and package directory
+rm -rf /var/packages/PhotoOrganizer
+
+# Try to delete package user (may fail on DSM 7 - that's OK)
+PACKAGE_USER="PhotoOrganizer"
+if id "$PACKAGE_USER" > /dev/null 2>&1; then
+    if command -v synouser > /dev/null 2>&1; then
+        synouser --del "$PACKAGE_USER" >> $SYNOPKG_TEMP_LOGFILE 2>&1 || true
+    elif command -v userdel > /dev/null 2>&1; then
+        userdel -r "$PACKAGE_USER" >> $SYNOPKG_TEMP_LOGFILE 2>&1 || true
+    fi
+    
+    # If user still exists, provide instructions
+    if id "$PACKAGE_USER" > /dev/null 2>&1; then
+        # echo "NOTE: Uninstall Successful, however the user '${PACKAGE_USER}' cannot be deleted automatically. To change its access: Control Panel > Shared Folder > photo > Edit > Permissions > System internal user" >> $SYNOPKG_TEMP_LOGFILE
+    fi
+fi
+
+# Note: We don't remove user data in /volume1/photo/ to preserve user's photos
+# Note: We don't remove folder permissions - they will remain but won't affect anything
+
+# Log uninstallation completion
+_log_message "Uninstallation completed successfully"
+if id "$PACKAGE_USER" > /dev/null 2>&1; then
+    _log_message "NOTE: User $PACKAGE_USER still exists (Synology limitation). Remove manually if needed."
+fi
+
+exit 0
+

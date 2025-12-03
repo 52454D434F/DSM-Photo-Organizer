@@ -1,0 +1,4 @@
+Pillow>=12.0.0
+watchdog
+imagehash
+mutagen

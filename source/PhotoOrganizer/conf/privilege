@@ -1,0 +1,7 @@
+{
+	"defaults":{
+		"run-as": "package"
+	},
+	"username": "PhotoOrganizer",
+	"join-groupname": "system"
+}
