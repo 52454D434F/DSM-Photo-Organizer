@@ -3,13 +3,11 @@ date = '2025-12-01T14:23:59-06:00'
 draft = false
 title = 'Photo Organizer and Deduplicator'
 tags = ['synology', 'dsm', 'photo-management', 'automation', 'python', 'package']
-image = '/images/icon_256.png'
+image = 'images/icon_256.png'
 +++
 
-# DSM 7 Package
-<figure style="text-align: center; margin: 1em 0;">
-  <img src="/images/icon_256.png" alt="Photo Organizer Icon" style="width: 256px; height: 256px; max-width: 256px;" />
-</figure>
+# Synology DSM 7 Package
+{{< img src="/images/icon_256.png" alt="Photo Organizer Icon" style="width: 256px; height: 256px; max-width: 256px;" >}}
 
 ## Table of Contents
 
@@ -71,7 +69,7 @@ Files with date information are automatically renamed to `yyyymmdd_hhmmss.*` for
 
 ### Package Information
 - **Package Name**: PhotoOrganizer
-- **Version**: 1.0.1-0015
+- **Version**: 1.0.1-0016
 - **Display Name**: Photo Organizer and Deduplicator
 - **Architecture**: noarch (works on all Synology NAS models)
 - **Minimum DSM Version**: 7.0-40000
@@ -104,15 +102,14 @@ Once installed, the service runs automatically in the background:
 
 ## GitHub Repository
 
-[View on GitHub](https://github.com/52454D434F/Photo-Organizer)
+[View on GitHub](https://github.com/52454D434F/DSM-Projects)
 
 The project source code, build scripts, and documentation are available on GitHub. Contributions, bug reports, and feature requests are welcome!
 
 ## Download
 
-### Latest Version: 1.0.1-0016
-
-[Download PhotoOrganizer-1.0.1-0016.spk](/downloads/PhotoOrganizer-1.0.1-0016.spk)
+### Latest Version: 1.0.1-00016
+[Download PhotoOrganizer-1.0.x-xxxxx.spk](https://github.com/52454D434F/DSM-Projects/blob/e7c6452f16fba1a8fed28b4e3d414815bd007c90/result_spk/PhotoOrganizer-1.0.1-00016/PhotoOrganizer-1.0.1-00016.spk)
 
 ## How It Works
 
@@ -573,7 +570,7 @@ This package provides automatic photo organization functionality for Synology NA
 
 ## Support
 
-For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/52454D434F/Photo-Organizer)
+For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/52454D434F/DSM-Projects/issues)
 
 ---
 
