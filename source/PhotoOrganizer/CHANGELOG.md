@@ -5,6 +5,56 @@ All notable changes to the Photo Organizer and Deduplicator project will be docu
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1-00018] - 2025-01-XX
+
+### Added
+- **CreateDate EXIF Tag Support**
+  - Added support for extracting CreateDate tag from EXIF metadata
+  - CreateDate is checked in priority order after DateTimeOriginal and DateTimeDigitized
+  - Supports both top-level and nested ExifIFD CreateDate tags
+  - Some cameras and software use CreateDate as an alternative date tag
+
+- **Enhanced Log Entries with Destination Format**
+  - All log entries now include destination file format information
+  - "Duplicate Deleted" entries show destination format: `yyyy/mm_MMM/yyyymmdd_hhmmss.ext`
+  - "File moved" entries show destination path format
+  - "Moved to Duplicates" entries show where duplicate was found
+  - Improves traceability and debugging of file operations
+
+### Changed
+- **Date Extraction Priority Order (CRITICAL FIX)**
+  - **Fixed incorrect priority order** - now correctly prioritizes nested ExifIFD tags over top-level tags
+  - New priority order (highest to lowest):
+    1. Nested ExifIFD DateTimeOriginal (tag 0x9003) - **HIGHEST PRIORITY**
+    2. Nested ExifIFD DateTimeDigitized (tag 0x9004)
+    3. Nested ExifIFD CreateDate
+    4. Top-level DateTimeOriginal
+    5. Top-level DateTimeDigitized
+    6. Top-level CreateDate
+    7. Top-level DateTime (tag 0x0132) - **LOWEST PRIORITY**
+  - Previously, the script incorrectly checked top-level DateTime (file modification date) before nested DateTimeOriginal (actual photo capture date)
+  - This fix ensures the actual photo capture date is used instead of file modification date
+  - **Impact**: Photos will now be organized by their actual capture date, not when they were last modified
+
+### Fixed
+- **Date Extraction Logic**
+  - Fixed bug where top-level DateTime (file modification date) was checked before nested DateTimeOriginal (photo capture date)
+  - Now correctly extracts the actual photo capture date from nested EXIF data
+  - Tag 306 (0x0132) is correctly identified as "DateTime" (file modification), not "DateTimeOriginal"
+  - Nested ExifIFD DateTimeOriginal (tag 0x9003) is now properly prioritized
+
+- **Log Entry Consistency**
+  - Fixed all log entries to properly include destination format information
+  - Fixed typo: "Different content then file" → "Different content than file"
+  - All `dest_format` variables are now properly defined before use in log messages
+
+### Technical Details
+- Date extraction now follows EXIF standard priority: nested ExifIFD tags contain the most accurate capture metadata
+- Most modern cameras store DateTimeOriginal in nested ExifIFD structure, not top-level tags
+- The fix ensures compatibility with both legacy and modern camera EXIF formats
+
+---
+
 ## [1.0.1-00017] - 2025-12-03
 
 ### Added

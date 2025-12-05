@@ -676,7 +676,17 @@ def get_video_taken_date(video_path):
     return None
 
 def get_exif_taken_date(image_path):
-    """Get EXIF DateTimeOriginal and return as datetime object."""
+    """Get EXIF date (DateTimeOriginal, CreateDate, DateTimeDigitized, or DateTime) and return as datetime object.
+    
+    Checks in priority order:
+    1. Nested ExifIFD DateTimeOriginal (highest priority)
+    2. Nested ExifIFD DateTimeDigitized
+    3. Nested ExifIFD CreateDate
+    4. Top-level DateTimeOriginal
+    5. Top-level DateTimeDigitized
+    6. Top-level CreateDate
+    7. Top-level DateTime (lowest priority)
+    """
     try:
         with Image.open(image_path) as image:
             exif_data = None
@@ -694,60 +704,116 @@ def get_exif_taken_date(image_path):
             if not exif_data:
                 return None
             
-            # Try to get DateTimeOriginal (tag 306 / 0x9003)
+            # Try to get date following priority order
             date_time_original = None
             
             # Method 1: Try direct tag access (for getexif())
             if hasattr(exif_data, 'get'):
                 # New getexif() returns a dict-like object
-                # First try top-level tags
-                date_time_original = exif_data.get(306)  # Tag 306 is DateTimeOriginal
+                # PRIORITY 1-3: Check nested EXIF data FIRST (ExifIFD - tag 34665 / 0x8769)
+                try:
+                    # Tag 34665 (0x8769) is ExifIFD - contains nested EXIF tags
+                    # DateTimeOriginal is tag 0x9003 (36867) in ExifIFD
+                    if hasattr(exif_data, 'get_ifd'):
+                        # Use get_ifd() method to access nested IFD (Pillow 8.0+)
+                        try:
+                            exif_ifd = exif_data.get_ifd(0x8769)  # ExifIFD
+                            # PRIORITY 1: DateTimeOriginal is tag 0x9003 (36867) in ExifIFD
+                            date_time_original = exif_ifd.get(0x9003)  # DateTimeOriginal
+                            # PRIORITY 2: Try DateTimeDigitized (0x9004) as fallback
+                            if not date_time_original:
+                                date_time_original = exif_ifd.get(0x9004)
+                            # PRIORITY 3: Try CreateDate in nested EXIF (some cameras use this)
+                            if not date_time_original:
+                                # CreateDate might be stored as a custom tag, check by iterating
+                                for nested_tag_id in exif_ifd.keys():
+                                    nested_tag_name = TAGS.get(nested_tag_id, nested_tag_id)
+                                    if nested_tag_name == 'CreateDate' or 'CreateDate' in str(nested_tag_name):
+                                        date_time_original = exif_ifd.get(nested_tag_id)
+                                        if date_time_original:
+                                            break
+                        except Exception:
+                            pass
+                    
+                    # Alternative: Try accessing ExifIFD tag directly
+                    if not date_time_original:
+                        exif_ifd_tag = exif_data.get(34665)  # ExifIFD tag (0x8769)
+                        if exif_ifd_tag and hasattr(exif_ifd_tag, 'get'):
+                            # PRIORITY 1: DateTimeOriginal
+                            date_time_original = exif_ifd_tag.get(0x9003) or exif_ifd_tag.get(36867)
+                            # PRIORITY 2: DateTimeDigitized
+                            if not date_time_original:
+                                date_time_original = exif_ifd_tag.get(0x9004) or exif_ifd_tag.get(36868)
+                            # PRIORITY 3: CreateDate
+                            if not date_time_original and hasattr(exif_ifd_tag, 'keys'):
+                                for nested_tag_id in exif_ifd_tag.keys():
+                                    nested_tag_name = TAGS.get(nested_tag_id, nested_tag_id)
+                                    if nested_tag_name == 'CreateDate' or 'CreateDate' in str(nested_tag_name):
+                                        date_time_original = exif_ifd_tag.get(nested_tag_id)
+                                        if date_time_original:
+                                            break
+                except Exception:
+                    pass
                 
-                # If not found, check nested EXIF data (ExifIFD - tag 34665 / 0x8769)
+                # PRIORITY 4-7: If not found in nested, check top-level tags in priority order
                 if not date_time_original:
-                    try:
-                        # Tag 34665 (0x8769) is ExifIFD - contains nested EXIF tags
-                        # DateTimeOriginal is tag 0x9003 (36867) in ExifIFD
-                        if hasattr(exif_data, 'get_ifd'):
-                            # Use get_ifd() method to access nested IFD (Pillow 8.0+)
-                            try:
-                                exif_ifd = exif_data.get_ifd(0x8769)  # ExifIFD
-                                # DateTimeOriginal is tag 0x9003 (36867) in ExifIFD
-                                date_time_original = exif_ifd.get(0x9003)  # DateTimeOriginal
-                                if not date_time_original:
-                                    # Try DateTimeDigitized (0x9004) as fallback
-                                    date_time_original = exif_ifd.get(0x9004)
-                            except Exception:
-                                pass
-                        
-                        # Alternative: Try accessing ExifIFD tag directly
-                        if not date_time_original:
-                            exif_ifd_tag = exif_data.get(34665)  # ExifIFD tag (0x8769)
-                            if exif_ifd_tag and hasattr(exif_ifd_tag, 'get'):
-                                date_time_original = exif_ifd_tag.get(0x9003) or exif_ifd_tag.get(36867)
-                    except Exception:
-                        pass
-                
-                # If still not found, iterate through all top-level tags
-                if not date_time_original:
+                    # PRIORITY 4: Top-level DateTimeOriginal
                     for tag_id in exif_data.keys():
                         tag_name = TAGS.get(tag_id, tag_id)
                         if tag_name == 'DateTimeOriginal':
                             date_time_original = exif_data.get(tag_id)
                             break
-                        # Also check for other date tags as fallback
-                        if tag_name in ['DateTime', 'DateTimeDigitized'] and not date_time_original:
-                            date_time_original = exif_data.get(tag_id)
+                    # PRIORITY 5: Top-level DateTimeDigitized
+                    if not date_time_original:
+                        for tag_id in exif_data.keys():
+                            tag_name = TAGS.get(tag_id, tag_id)
+                            if tag_name == 'DateTimeDigitized':
+                                date_time_original = exif_data.get(tag_id)
+                                break
+                    # PRIORITY 6: Top-level CreateDate
+                    if not date_time_original:
+                        for tag_id in exif_data.keys():
+                            tag_name = TAGS.get(tag_id, tag_id)
+                            if tag_name == 'CreateDate' or 'CreateDate' in str(tag_name):
+                                date_time_original = exif_data.get(tag_id)
+                                break
+                    # PRIORITY 7: Top-level DateTime (lowest priority)
+                    if not date_time_original:
+                        for tag_id in exif_data.keys():
+                            tag_name = TAGS.get(tag_id, tag_id)
+                            if tag_name == 'DateTime':
+                                date_time_original = exif_data.get(tag_id)
+                                break
             else:
                 # Method 2: Old _getexif() returns a dict - iterate through items
+                # Note: Old _getexif() doesn't support nested ExifIFD easily, so we check top-level only
+                # But we still follow priority order: DateTimeOriginal > DateTimeDigitized > CreateDate > DateTime
                 for tag_id, value in exif_data.items():
                     tag = TAGS.get(tag_id, tag_id)
                     if tag == 'DateTimeOriginal':
                         date_time_original = value
                         break
-                    # Also check for other date tags as fallback
-                    if tag in ['DateTime', 'DateTimeDigitized'] and not date_time_original:
-                        date_time_original = value
+                # If not found, try DateTimeDigitized
+                if not date_time_original:
+                    for tag_id, value in exif_data.items():
+                        tag = TAGS.get(tag_id, tag_id)
+                        if tag == 'DateTimeDigitized':
+                            date_time_original = value
+                            break
+                # If not found, try CreateDate
+                if not date_time_original:
+                    for tag_id, value in exif_data.items():
+                        tag = TAGS.get(tag_id, tag_id)
+                        if tag == 'CreateDate' or 'CreateDate' in str(tag):
+                            date_time_original = value
+                            break
+                # If not found, try DateTime (lowest priority)
+                if not date_time_original:
+                    for tag_id, value in exif_data.items():
+                        tag = TAGS.get(tag_id, tag_id)
+                        if tag == 'DateTime':
+                            date_time_original = value
+                            break
             
             if date_time_original:
                 # Format: 'YYYY:MM:DD HH:MM:SS'
@@ -983,7 +1049,9 @@ def process_photo(file_path):
                             file_size = source_size
                             if DELETE_DUPLICATES:
                                 os.remove(file_path)
-                                log_file_event("Duplicate Deleted", file_path, None, file_size, "Unknown file type - exact duplicate detected and deleted")
+                                # Format destination path for log
+                                dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                                log_file_event("Duplicate Deleted", file_path, None, file_size, f"Exact duplicate to {dest_format} detected and deleted")
                                 stats["files_deleted"] += 1
                                 stats["bytes_deleted"] += file_size
                                 bytes_deleted += file_size  # Legacy compatibility
@@ -996,7 +1064,9 @@ def process_photo(file_path):
                                 unique_name = get_unique_duplicate_filename(duplicates_folder, original_filename)
                                 duplicates_path = os.path.join(duplicates_folder, unique_name)
                                 shutil.move(file_path, duplicates_path)
-                                log_file_event("Moved to Duplicates", file_path, duplicates_path, file_size, "Unknown file type - exact duplicate detected (kept, not deleted)")
+                                # Format destination path for log
+                                dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                                log_file_event("Moved to Duplicates", file_path, duplicates_path, file_size, f"Unknown file type - exact duplicate to {dest_format} detected (kept, not deleted)")
                                 stats["files_moved_to_duplicates"] += 1
                                 stats["bytes_moved_to_duplicates"] += file_size
                                 bytes_moved += file_size  # Legacy compatibility
@@ -1010,7 +1080,9 @@ def process_photo(file_path):
         try:
             file_size = os.path.getsize(file_path)
             shutil.move(file_path, dest_path)
-            log_file_event("File moved", file_path, dest_path, file_size, f"Unknown file type moved to Unknown File Types folder")
+            # Format destination path for log
+            dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+            log_file_event("File moved", file_path, dest_path, file_size, f"Unknown file type moved to {dest_format}")
             stats["files_moved_to_destination"] += 1
             stats["bytes_moved_to_destination"] += file_size
             bytes_moved += file_size  # Legacy compatibility
@@ -1077,7 +1149,9 @@ def process_photo(file_path):
                 if DELETE_DUPLICATES:
                     # Delete the duplicate file
                     os.remove(file_path)
-                    log_file_event("Duplicate Deleted", file_path, None, file_size, "Exact duplicate detected and deleted")
+                    # Format destination path for log (yyyy/mm_MMM/yyyymmdd_hhmmss.ext)
+                    dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                    log_file_event("Duplicate Deleted", file_path, None, file_size, f"Exact duplicate to {dest_format} detected and deleted")
                     # Update statistics
                     stats["files_deleted"] += 1
                     stats["bytes_deleted"] += file_size
@@ -1094,7 +1168,9 @@ def process_photo(file_path):
                     duplicates_path = os.path.join(duplicates_folder, unique_name)
 
                     shutil.move(file_path, duplicates_path)
-                    log_file_event("Moved to Duplicates", file_path, duplicates_path, file_size, "Exact duplicate detected (kept, not deleted)")
+                    # Format destination path for log
+                    dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                    log_file_event("Moved to Duplicates", file_path, duplicates_path, file_size, f"Exact duplicate to {dest_format} detected (kept, not deleted)")
                     # Update statistics
                     stats["files_moved_to_duplicates"] += 1
                     stats["bytes_moved_to_duplicates"] += file_size
@@ -1140,7 +1216,14 @@ def process_photo(file_path):
                 try:
                     file_size = os.path.getsize(file_to_move)
                     os.remove(file_to_move)
-                    log_file_event("Duplicate Deleted", file_to_move, None, file_size, f"Exact duplicate already exists in Duplicates folder: {os.path.basename(existing_duplicate)}")
+                    # Format destination path for log
+                    if file_to_move == dest_path:
+                        # File was in destination folder, show destination format
+                        dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                    else:
+                        # File was in source, show where duplicate exists
+                        dest_format = os.path.relpath(existing_duplicate, DEST_DIR).replace(os.sep, '/')
+                    log_file_event("Duplicate Deleted", file_to_move, None, file_size, f"Exact duplicate to {dest_format} detected and deleted")
                     # Update statistics
                     # If deleting from destination, subtract from destination stats
                     if file_to_move == dest_path:
@@ -1162,7 +1245,9 @@ def process_photo(file_path):
                     try:
                         file_size = os.path.getsize(file_path)
                         shutil.move(file_path, dest_path)
-                        log_file_event("File moved", file_path, dest_path, file_size, "Replaced existing file with current file (is older)")
+                        # Format destination path for log
+                        dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                        log_file_event("File moved", file_path, dest_path, file_size, f"Replaced existing {dest_format} file with current file (is older)")
                         # Update statistics
                         stats["files_moved_to_destination"] += 1
                         stats["bytes_moved_to_destination"] += file_size
@@ -1181,7 +1266,9 @@ def process_photo(file_path):
             try:
                 file_size = os.path.getsize(file_to_move)
                 shutil.move(file_to_move, duplicates_path)
-                log_file_event("Moved to Duplicates", file_to_move, duplicates_path, file_size, f"Different content - {event_info}")
+                # Format destination path for log
+                dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                log_file_event("Moved to Duplicates", file_to_move, duplicates_path, file_size, f"Different content than file {dest_format} - {event_info}")
                 # Update statistics
                 # If moving from destination to duplicates, adjust destination stats
                 if file_to_move == dest_path:
@@ -1201,7 +1288,9 @@ def process_photo(file_path):
                     try:
                         file_size = os.path.getsize(file_path)
                         shutil.move(file_path, dest_path)
-                        log_file_event("File moved", file_path, dest_path, file_size, "Replaced existing file with the oldest file")
+                        # Format destination path for log
+                        dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                        log_file_event("File moved", file_path, dest_path, file_size, f"Replaced existing {dest_format} file with the oldest file")
                         # Update statistics
                         stats["files_moved_to_destination"] += 1
                         stats["bytes_moved_to_destination"] += file_size
@@ -1222,10 +1311,12 @@ def process_photo(file_path):
         
         file_size = os.path.getsize(file_path)
         shutil.move(file_path, dest_path)
+        # Format destination path for log
+        dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
         if media_datetime:
-            log_file_event("File moved", file_path, dest_path, file_size, f"Renamed to {dest_filename}")
+            log_file_event("File moved", file_path, dest_path, file_size, f"Renamed to {dest_filename} and moved to {dest_format}")
         else:
-            log_file_event("File moved", file_path, dest_path, file_size, "No date found keeping original name")
+            log_file_event("File moved", file_path, dest_path, file_size, f"No date found keeping original name, moved to {dest_format}")
         # Update statistics
         stats["files_moved_to_destination"] += 1
         stats["bytes_moved_to_destination"] += file_size
