@@ -225,8 +225,6 @@ The application uses multiple logging methods for reliability: system logger (ac
 
 - **Via DSM Log Center**: Filter by tag `PhotoOrganizer` (Control Panel → Log Center → System Logs)
 
-**Note:** Log file names were changed in v1.0.1-00017 for clarity.
-
 ### Log Format Details
 
 #### File Operation Log Format
@@ -253,8 +251,6 @@ Each entry in `Photo_Organizer_Application.log` contains:
 - **User**: System user running the service
 - **Event**: Description of system or application event (e.g., "Service Started", "Service Stopped", dependencies checked, statistics saved, errors, etc.)
 
-> **Updated in v1.0.1-00017:**  
-> - Statistics dump on shutdown removed from application log to reduce clutter; see `Photo_Organizer_Statistics.json` for details.
 - Application log now focuses on service events, startup/shutdown, and critical errors.
 - Log file path and naming updated for clarity in this version.
 
