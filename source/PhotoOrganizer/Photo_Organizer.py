@@ -145,7 +145,10 @@ def initialize_statistics_file():
     STATS_FILE = os.path.abspath(STATS_FILE)
 
 def load_statistics():
-    """Load statistics from JSON file."""
+    """Load statistics from JSON file.
+    
+    Supports both old format (flat) and new format (wrapped in "stats" object).
+    """
     global stats
     if STATS_FILE is None:
         initialize_statistics_file()
@@ -160,13 +163,21 @@ def load_statistics():
                     except (IOError, OSError):
                         pass  # Locking failed, continue without lock
                 
-                loaded_stats = json.load(f)
+                loaded_data = json.load(f)
                 
                 if HAS_FCNTL:
                     try:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                     except (IOError, OSError):
                         pass
+                
+                # Handle both old format (flat) and new format (wrapped in "stats")
+                if isinstance(loaded_data, dict) and "stats" in loaded_data:
+                    # New format: wrapped in "stats" object
+                    loaded_stats = loaded_data["stats"]
+                else:
+                    # Old format: flat structure (backward compatibility)
+                    loaded_stats = loaded_data
                 
                 # Merge with defaults (in case new fields were added)
                 for key in stats:
@@ -185,6 +196,8 @@ def load_statistics():
 def save_statistics(force=False):
     """Save statistics to JSON file with file locking.
     
+    Saves statistics in new format: wrapped in "stats" object.
+    
     Args:
         force: If True, save immediately regardless of counter
     """
@@ -198,7 +211,7 @@ def save_statistics(force=False):
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(STATS_FILE), exist_ok=True)
         
-        # Write with file locking
+        # Write with file locking - use new format with "stats" wrapper
         with open(STATS_FILE, 'w', encoding='utf-8') as f:
             if HAS_FCNTL:
                 try:
@@ -206,7 +219,9 @@ def save_statistics(force=False):
                 except (IOError, OSError):
                     pass  # Locking failed, continue without lock
             
-            json.dump(stats, f, indent=2)
+            # Save in new format: wrap stats in "stats" object
+            output_data = {"stats": stats}
+            json.dump(output_data, f, indent=2)
             
             if HAS_FCNTL:
                 try:
