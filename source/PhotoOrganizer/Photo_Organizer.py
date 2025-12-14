@@ -602,13 +602,6 @@ def update_synology_indexer(old_path=None, new_path=None):
         old_path: Path to remove from index (if file was moved/deleted)
         new_path: Path to add to index (if file was moved/created)
     """
-    # #region agent log
-    import json
-    try:
-        with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"id":f"log_{int(time.time())}_indexer_entry","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:598","message":"update_synology_indexer entry","data":{"old_path":old_path,"new_path":new_path,"is_synology":is_synology_nas()},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-    except: pass
-    # #endregion
     if not is_synology_nas():
         return
     
@@ -616,12 +609,6 @@ def update_synology_indexer(old_path=None, new_path=None):
         # Remove old path from index if provided
         if old_path and os.path.exists('/usr/syno/bin/synoindex'):
             try:
-                # #region agent log
-                try:
-                    with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"id":f"log_{int(time.time())}_indexer_remove","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:610","message":"Calling synoindex -D","data":{"old_path":old_path},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-                except: pass
-                # #endregion
                 subprocess.run(['/usr/syno/bin/synoindex', '-D', old_path], 
                              check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
             except Exception:
@@ -630,38 +617,11 @@ def update_synology_indexer(old_path=None, new_path=None):
         # Add new path to index if provided
         if new_path and os.path.exists(new_path) and os.path.exists('/usr/syno/bin/synoindex'):
             try:
-                # #region agent log
-                try:
-                    file_size = os.path.getsize(new_path) if os.path.exists(new_path) else 0
-                    file_ext = os.path.splitext(new_path)[1].lower()
-                    is_mov = file_ext == '.mov'
-                    with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"id":f"log_{int(time.time())}_indexer_add_before","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:618","message":"Before synoindex -A call","data":{"new_path":new_path,"file_size":file_size,"is_mov":is_mov,"file_exists":os.path.exists(new_path)},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-                except: pass
-                # #endregion
-                result = subprocess.run(['/usr/syno/bin/synoindex', '-A', new_path], 
-                             check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                # #region agent log
-                try:
-                    with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"id":f"log_{int(time.time())}_indexer_add_after","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:620","message":"After synoindex -A call","data":{"new_path":new_path,"returncode":result.returncode,"stderr":result.stderr.decode('utf-8','ignore')[:200] if result.stderr else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-                except: pass
-                # #endregion
-            except Exception as e:
-                # #region agent log
-                try:
-                    with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"id":f"log_{int(time.time())}_indexer_error","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:622","message":"Error in synoindex -A","data":{"new_path":new_path,"error":str(e)},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-                except: pass
-                # #endregion
+                subprocess.run(['/usr/syno/bin/synoindex', '-A', new_path], 
+                             check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            except Exception:
                 pass  # Silently fail if synoindex is not available or times out
-    except Exception as e:
-        # #region agent log
-        try:
-            with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id":f"log_{int(time.time())}_indexer_exception","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:625","message":"Exception in update_synology_indexer","data":{"error":str(e)},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-        except: pass
-        # #endregion
+    except Exception:
         pass  # Silently fail if indexer update fails
 
 def is_video_file(file_path):
@@ -681,13 +641,6 @@ def is_image_file(file_path):
 
 def get_video_taken_date(video_path):
     """Get creation date from video file metadata and return as datetime object."""
-    # #region agent log
-    import json
-    try:
-        with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"id":f"log_{int(time.time())}_get_video","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:642","message":"get_video_taken_date entry","data":{"video_path":video_path,"file_exists":os.path.exists(video_path) if video_path else False},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + '\n')
-    except: pass
-    # #endregion
     try:
         # Try using mutagen for MP4/MOV files
         if MUTAGEN_AVAILABLE:
@@ -718,22 +671,8 @@ def get_video_taken_date(video_path):
                         pass
             
             elif file_ext == '.mov':
-                # #region agent log
-                try:
-                    file_size_before = os.path.getsize(video_path) if os.path.exists(video_path) else 0
-                    with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"id":f"log_{int(time.time())}_mov_before","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:673","message":"MOV file before mutagen read","data":{"video_path":video_path,"file_size":file_size_before},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + '\n')
-                except: pass
-                # #endregion
                 # MOV files use the same container format as MP4, so use MP4 module
                 mov_file = MP4(video_path)
-                # #region agent log
-                try:
-                    file_size_after = os.path.getsize(video_path) if os.path.exists(video_path) else 0
-                    with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"id":f"log_{int(time.time())}_mov_after","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:675","message":"MOV file after mutagen read","data":{"video_path":video_path,"file_size":file_size_after,"has_day_tag":'©day' in mov_file},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + '\n')
-                except: pass
-                # #endregion
                 # Try to get creation date from MOV metadata (same tags as MP4)
                 if '©day' in mov_file:
                     date_str = mov_file['©day'][0]
@@ -758,20 +697,8 @@ def get_video_taken_date(video_path):
             # mutagen not available, will fall back to file date
             pass
     except Exception as e:
-        # #region agent log
-        try:
-            with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id":f"log_{int(time.time())}_mov_error","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:699","message":"Error reading video metadata","data":{"video_path":video_path,"error":str(e),"error_type":type(e).__name__},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + '\n')
-        except: pass
-        # #endregion
         # Error reading video metadata, will fall back to file date
         pass
-    # #region agent log
-    try:
-        with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"id":f"log_{int(time.time())}_get_video_exit","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:704","message":"get_video_taken_date exit (no date found)","data":{"video_path":video_path},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"}) + '\n')
-    except: pass
-    # #endregion
     return None
 
 def get_exif_taken_date(image_path):
@@ -1208,15 +1135,6 @@ def process_photo(file_path):
     # Try to get date from metadata
     media_datetime = None
     if is_video:
-        # #region agent log
-        import json
-        try:
-            file_ext = os.path.splitext(file_path)[1].lower()
-            is_mov = file_ext == '.mov'
-            with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id":f"log_{int(time.time())}_video_processing","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:1139","message":"Processing video file","data":{"file_path":file_path,"is_mov":is_mov,"file_ext":file_ext},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + '\n')
-        except: pass
-        # #endregion
         # For video files, try to get date from video metadata
         media_datetime = get_video_taken_date(file_path)
     else:
@@ -1455,31 +1373,8 @@ def process_photo(file_path):
         if not os.path.isfile(file_path):
             return
         
-        # #region agent log
-        import json
-        file_ext = os.path.splitext(file_path)[1].lower()
-        is_mov = file_ext == '.mov'
-        try:
-            file_size_before = os.path.getsize(file_path)
-            file_stat_before = os.stat(file_path)
-            with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id":f"log_{int(time.time())}_move_before","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:1378","message":"Before file move operation","data":{"file_path":file_path,"dest_path":dest_path,"file_size":file_size_before,"is_mov":is_mov,"mode":oct(file_stat_before.st_mode)},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + '\n')
-        except: pass
-        # #endregion
-        
         file_size = os.path.getsize(file_path)
         shutil.move(file_path, dest_path)
-        
-        # #region agent log
-        try:
-            import stat
-            file_stat_after = os.stat(dest_path)
-            file_size_after = os.path.getsize(dest_path)
-            with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id":f"log_{int(time.time())}_move_after","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:1379","message":"After file move operation","data":{"dest_path":dest_path,"file_size":file_size_after,"size_match":file_size==file_size_after,"mode":oct(file_stat_after.st_mode)},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"}) + '\n')
-        except: pass
-        # #endregion
-        
         # Update statistics IMMEDIATELY after move to ensure it's counted even if logging fails
         stats["files_moved_to_destination"] += 1
         stats["bytes_moved_to_destination"] += file_size
@@ -1501,22 +1396,10 @@ def process_photo(file_path):
                 pass  # If even error logging fails, continue silently
         
         # Update Synology indexer (non-critical, can fail without affecting stats)
-        # #region agent log
-        try:
-            with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id":f"log_{int(time.time())}_before_indexer","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:1400","message":"Before calling update_synology_indexer","data":{"dest_path":dest_path,"is_mov":is_mov},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-        except: pass
-        # #endregion
         try:
             update_synology_indexer(old_path=file_path, new_path=dest_path)
         except Exception:
             pass  # Indexer update failed, but file was moved and stats were updated
-        # #region agent log
-        try:
-            with open('\\\\wsl.localhost\\Ubuntu\\home\\remco\\DSM-Projects\\.cursor\\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id":f"log_{int(time.time())}_after_indexer","timestamp":int(time.time()*1000),"location":"Photo_Organizer.py:1402","message":"After calling update_synology_indexer","data":{"dest_path":dest_path},"sessionId":"debug-session","runId":"run1","hypothesisId":"B"}) + '\n')
-        except: pass
-        # #endregion
     except FileNotFoundError:
         # File was already moved or deleted, ignore silently
         pass
