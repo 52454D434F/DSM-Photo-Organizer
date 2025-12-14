@@ -8,11 +8,11 @@ VERSION_FILE="$(dirname "$0")/VERSION"
 if [ -f "$VERSION_FILE" ]; then
     version=$(cat "$VERSION_FILE" | tr -d '\n\r ')
 else
-    version="1.0.1-00001"  # Fallback
+    version="1.0.0-00001"  # Fallback
 fi
 
-package="PhotoOrganizer"
-displayname="Photo Organizer and Deduplicator"
+package="Json-Server"
+displayname="JSON Server"
 os_min_ver="7.0-40000"
 maintainer="M -- O --- R .-. C -.-. E ."
 maintainer_url="https://github.com/52454D434F/"
@@ -22,7 +22,7 @@ arch="noarch"
 thirdparty="yes"
 silent_install="no"
 silent_upgrade="no"
-description="Photo Organizer and Deduplicator is an application for automated sorting and deduplication of image (and video) files. Uses EXIF metadata to sort photos by capture date into year-based folders (yyyy/mm_MMM). Continuously monitors a user-defined source directory and organizes new files. Supports duplicate file detection and handling (deleted if equal)."
+description="JSON Server is a Node.js package that provides a REST API server from a JSON file. This package installs and runs json-server on your Synology NAS, allowing you to quickly create a mock REST API for development and testing purposes."
 #dsmuidir="ui"
 [ "$(caller)" != "0 NULL" ] && return 0
 pkg_dump_info

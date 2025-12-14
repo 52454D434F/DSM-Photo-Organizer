@@ -1,0 +1,15 @@
+[
+	{
+		"step_title": "Server Configuration",
+		"items": [{
+			"type": "textfield",
+			"desc": "Port number for JSON Server",
+			"subitems": [{
+				"key": "UI_PORT",
+				"desc": "Port number (default: 3000)",
+				"emptyText": "3000",
+				"defaultValue": "3000"
+			}]
+		}]
+	}
+]

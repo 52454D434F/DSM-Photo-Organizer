@@ -1,0 +1,220 @@
+#!/bin/bash
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### Use PKG_DIR as working directory.
+PKG_DIR=/tmp/_test_spk
+rm -rf $PKG_DIR
+mkdir -p $PKG_DIR
+
+### get spk packing functions
+source /pkgscripts/include/pkg_util.sh
+
+create_package_tgz() {
+	local package_tgz_dir=/tmp/_package_tgz
+	local app_dir=$package_tgz_dir/usr/local/Json-Server
+	local bin_dir=$package_tgz_dir/usr/local/bin
+
+	### clear destination directory
+	rm -rf $package_tgz_dir && mkdir -p $package_tgz_dir
+
+	### install application files
+	mkdir -p $app_dir
+	mkdir -p $bin_dir
+	
+	# Copy main Node.js script
+	if [ ! -f "json-server-start.js" ]; then
+		echo "Error: json-server-start.js not found in source directory" >&2
+		exit 1
+	fi
+	cp -av json-server-start.js $app_dir/
+	chmod +x $app_dir/json-server-start.js
+	
+	# Copy package.json if exists
+	cp -av package.json $app_dir/ 2>/dev/null || true
+	
+	# Copy default db.json
+	if [ -f "db.json" ]; then
+		cp -av db.json $app_dir/
+	fi
+	
+	# Copy default config.ini
+	if [ -f "config.ini" ]; then
+		cp -av config.ini $app_dir/
+	fi
+	
+	# Copy VERSION file (for runtime version reading)
+	cp -av VERSION $app_dir/ 2>/dev/null || true
+	
+	# Copy README if exists
+	cp -av README.md $app_dir/ 2>/dev/null || true
+	
+	# Create a .keep file to ensure the directory is definitely in the package
+	echo "Package installation marker" > $app_dir/.keep
+	chmod 644 $app_dir/.keep
+	
+	# Verify directory was created and has files
+	if [ ! -d "$app_dir" ]; then
+		echo "Error: Application directory was not created: $app_dir" >&2
+		exit 1
+	fi
+	
+	# Verify at least one file exists
+	if [ ! -f "$app_dir/json-server-start.js" ] && [ ! -f "$app_dir/.keep" ]; then
+		echo "Error: No files found in application directory: $app_dir" >&2
+		echo "Directory contents:" >&2
+		ls -la $app_dir/ >&2 || true
+		exit 1
+	fi
+	
+	echo "Successfully created application directory with files: $app_dir" >&2
+	ls -la $app_dir/ >&2 || true
+	
+	# Create symlink for easy access
+	ln -sf /usr/local/Json-Server/json-server-start.js $bin_dir/json-server
+
+	### Verify package structure before creating package.tgz
+	echo "Verifying package structure..." >&2
+	if [ ! -d "$app_dir" ]; then
+		echo "Error: Application directory missing: $app_dir" >&2
+		exit 1
+	fi
+	if [ ! -f "$app_dir/json-server-start.js" ]; then
+		echo "Error: json-server-start.js missing from package" >&2
+		exit 1
+	fi
+	echo "Package structure verified. Files in $app_dir:" >&2
+	ls -la "$app_dir/" >&2 || true
+	
+	### create package.tgz
+	pkg_make_package $package_tgz_dir "${PKG_DIR}"
+	
+	### Verify package.tgz was created
+	if [ ! -f "${PKG_DIR}/package.tgz" ]; then
+		echo "Error: package.tgz was not created" >&2
+		exit 1
+	fi
+	echo "Package tarball created successfully: ${PKG_DIR}/package.tgz" >&2
+}
+
+create_spk(){
+	# Ensure we're in the package source directory
+	PACKAGE_DIR="$(pwd)"
+	
+	cp -av scripts $PKG_DIR/scripts
+	cp -av conf $PKG_DIR/conf
+	cp -av LICENSE $PKG_DIR 2>/dev/null || true
+	
+	# Verify wizard file was copied
+	if [ ! -f "$PKG_DIR/conf/wizard" ]; then
+		echo "ERROR: Wizard file not found in package directory!" >&2
+		exit 1
+	fi
+	echo "Wizard file verified: $PKG_DIR/conf/wizard" >&2
+	
+	# Copy package icons if they exist
+	# Standard icon (usually 64x64 or 72x72)
+	ICON_COPIED=false
+	if [ -f "icon.png" ]; then
+		if cp -af icon.png $PKG_DIR/PACKAGE_ICON.PNG 2>/dev/null; then
+			if [ -f "$PKG_DIR/PACKAGE_ICON.PNG" ]; then
+				touch $PKG_DIR/PACKAGE_ICON.PNG
+				ICON_COPIED=true
+				echo "Successfully copied icon.png to PACKAGE_ICON.PNG" >&2
+			else
+				echo "Warning: Failed to verify PACKAGE_ICON.PNG after copy" >&2
+			fi
+		else
+			echo "Warning: Failed to copy icon.png" >&2
+		fi
+	elif [ -f "PACKAGE_ICON.PNG" ]; then
+		if cp -af PACKAGE_ICON.PNG $PKG_DIR/ 2>/dev/null; then
+			if [ -f "$PKG_DIR/PACKAGE_ICON.PNG" ]; then
+				touch $PKG_DIR/PACKAGE_ICON.PNG
+				ICON_COPIED=true
+				echo "Successfully copied PACKAGE_ICON.PNG (icon.png not found)" >&2
+			fi
+		fi
+	fi
+	
+	if [ "$ICON_COPIED" = false ]; then
+		echo "Warning: No icon file found or copied (neither icon.png nor PACKAGE_ICON.PNG)" >&2
+	fi
+	
+	# Large icon (256x256) for high-resolution displays
+	ICON_256_COPIED=false
+	if [ -f "icon_256.png" ]; then
+		if cp -af icon_256.png $PKG_DIR/PACKAGE_ICON_256.PNG 2>/dev/null; then
+			if [ -f "$PKG_DIR/PACKAGE_ICON_256.PNG" ]; then
+				touch $PKG_DIR/PACKAGE_ICON_256.PNG
+				ICON_256_COPIED=true
+				echo "Successfully copied icon_256.png to PACKAGE_ICON_256.PNG" >&2
+			else
+				echo "Warning: Failed to verify PACKAGE_ICON_256.PNG after copy" >&2
+			fi
+		else
+			echo "Warning: Failed to copy icon_256.png" >&2
+		fi
+	elif [ -f "PACKAGE_ICON_256.PNG" ]; then
+		if cp -af PACKAGE_ICON_256.PNG $PKG_DIR/ 2>/dev/null; then
+			if [ -f "$PKG_DIR/PACKAGE_ICON_256.PNG" ]; then
+				touch $PKG_DIR/PACKAGE_ICON_256.PNG
+				ICON_256_COPIED=true
+				echo "Successfully copied PACKAGE_ICON_256.PNG (icon_256.png not found)" >&2
+			fi
+		fi
+	fi
+	
+	if [ "$ICON_256_COPIED" = false ]; then
+		echo "Warning: No 256x256 icon file found or copied (neither icon_256.png nor PACKAGE_ICON_256.PNG)" >&2
+	fi
+	
+	# Verify icons are in the package directory
+	if [ "$ICON_COPIED" = true ] || [ "$ICON_256_COPIED" = true ]; then
+		echo "Icon files in package directory:" >&2
+		ls -lh $PKG_DIR/PACKAGE_ICON*.PNG 2>/dev/null | sed 's/^/  /' >&2 || echo "  (none found)" >&2
+	fi
+	
+	# Generate INFO file
+	if [ ! -f "INFO.sh" ]; then
+		echo "Error: INFO.sh not found in $PACKAGE_DIR" >&2
+		echo "Current directory: $(pwd)" >&2
+		exit 1
+	fi
+	
+	chmod +x INFO.sh
+	bash INFO.sh > INFO
+	INFO_EXIT_CODE=$?
+	
+	if [ $INFO_EXIT_CODE -ne 0 ]; then
+		echo "Error: INFO.sh failed with exit code $INFO_EXIT_CODE" >&2
+		exit 1
+	fi
+	
+	if [ ! -f "INFO" ]; then
+		echo "Error: INFO file was not created" >&2
+		exit 1
+	fi
+	
+	if [ ! -s "INFO" ]; then
+		echo "Error: INFO file is empty" >&2
+		exit 1
+	fi
+	
+	# Copy INFO to PKG_DIR for the SPK package
+	cp INFO $PKG_DIR/INFO
+	if [ ! -f "$PKG_DIR/INFO" ]; then
+		echo "Error: Failed to copy INFO file to $PKG_DIR" >&2
+		exit 1
+	fi
+
+	### Create the final spk.
+	mkdir -p /image/packages
+	pkg_make_spk ${PKG_DIR} "/image/packages" $(pkg_get_spk_family_name)
+}
+
+main() {
+	create_package_tgz
+	create_spk
+}
+
+main "$@"

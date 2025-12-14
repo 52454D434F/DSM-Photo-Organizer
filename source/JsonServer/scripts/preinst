@@ -1,0 +1,43 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+### This script will be executed when package installed and upgraded.
+### Actions before package installed.
+### ex. check environment.
+
+# Find Node.js 18+ (try node18, node, nodejs)
+NODE_CMD=""
+for node_cmd in node18 node nodejs; do
+    if command -v "$node_cmd" > /dev/null 2>&1; then
+        NODE_VERSION=$("$node_cmd" --version 2>/dev/null | sed 's/v//')
+        if [ -n "$NODE_VERSION" ]; then
+            NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1)
+            if [ "$NODE_MAJOR" -ge 18 ]; then
+                NODE_CMD="$node_cmd"
+                break
+            fi
+        fi
+    fi
+done
+
+if [ -z "$NODE_CMD" ]; then
+    echo "ERROR: Node.js 18 or higher is required." >> $SYNOPKG_TEMP_LOGFILE
+    echo "" >> $SYNOPKG_TEMP_LOGFILE
+    echo "Please install Node.js from Package Center:" >> $SYNOPKG_TEMP_LOGFILE
+    echo "1. Open Package Center on your Synology NAS" >> $SYNOPKG_TEMP_LOGFILE
+    echo "2. Search for 'Node.js' and install version 18 or higher" >> $SYNOPKG_TEMP_LOGFILE
+    echo "3. After installation, try installing this package again" >> $SYNOPKG_TEMP_LOGFILE
+    exit 1
+fi
+
+# Check for npm
+if ! command -v npm > /dev/null 2>&1; then
+    echo "ERROR: npm is required but not found." >> $SYNOPKG_TEMP_LOGFILE
+    echo "Please ensure Node.js is properly installed with npm." >> $SYNOPKG_TEMP_LOGFILE
+    exit 1
+fi
+
+# Store Node.js command for use in postinst
+echo "$NODE_CMD" > /tmp/json_server_node_cmd 2>/dev/null || true
+
+exit 0

@@ -1,0 +1,19 @@
+#!/bin/bash
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+# Build script - prepares files for packaging
+# Note: Node.js version check happens on target NAS during installation (preinst script)
+
+# Make server script executable
+if [ -f "json-server-start.js" ]; then
+    chmod +x json-server-start.js
+fi
+
+# Make all scripts executable
+if [ -d "scripts" ]; then
+    chmod +x scripts/*.sh 2>/dev/null || true
+    chmod +x scripts/* 2>/dev/null || true
+fi
+
+echo "Build completed successfully."
+echo "Note: Node.js and npm will be checked/installed on target NAS during package installation."

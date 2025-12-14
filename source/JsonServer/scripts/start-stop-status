@@ -1,0 +1,204 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+
+# Use package var directory for PID file
+if [ -d "/var/packages/Json-Server/var" ]; then
+    PID_FILE="/var/packages/Json-Server/var/json-server.pid"
+else
+    PID_FILE="/var/run/json-server.pid"
+fi
+
+# Primary location for run-as: package
+APP_DIR="/var/packages/Json-Server/target/usr/local/Json-Server"
+PACKAGE_VAR_DIR="/var/packages/Json-Server"
+NODE_MODULES_DIR="$PACKAGE_VAR_DIR/node_modules"
+CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
+DATA_DIR="$PACKAGE_VAR_DIR/data"
+LOG_FILE="/var/packages/Json-Server/var/json-server.log"
+
+# Check if /var/packages/Json-Server is writable, if not use package destination
+if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
+    if [ -n "$SYNOPKG_PKGDEST" ]; then
+        PACKAGE_VAR_DIR="$SYNOPKG_PKGDEST/var"
+        NODE_MODULES_DIR="$PACKAGE_VAR_DIR/node_modules"
+        CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
+        DATA_DIR="$PACKAGE_VAR_DIR/data"
+    else
+        PACKAGE_VAR_DIR="$APP_DIR/var"
+        NODE_MODULES_DIR="$PACKAGE_VAR_DIR/node_modules"
+        CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
+        DATA_DIR="$PACKAGE_VAR_DIR/data"
+    fi
+fi
+
+# Find Node.js command
+NODE_CMD=""
+for node_cmd in node18 node nodejs; do
+    if command -v "$node_cmd" > /dev/null 2>&1; then
+        NODE_CMD="$node_cmd"
+        break
+    fi
+done
+
+if [ -z "$NODE_CMD" ]; then
+    NODE_CMD="node"
+fi
+
+# Find json-server binary
+JSON_SERVER_BIN="$NODE_MODULES_DIR/.bin/json-server"
+if [ ! -f "$JSON_SERVER_BIN" ]; then
+    # Try global installation
+    if command -v json-server >/dev/null 2>&1; then
+        JSON_SERVER_BIN="json-server"
+    else
+        JSON_SERVER_BIN="$NODE_CMD $NODE_MODULES_DIR/json-server/lib/bin.js"
+    fi
+fi
+
+SCRIPT_PATH="$APP_DIR/json-server-start.js"
+if [ ! -f "$SCRIPT_PATH" ]; then
+    SCRIPT_PATH="/volume1/@appstore/Json-Server/usr/local/Json-Server/json-server-start.js"
+fi
+
+# Logging function
+_log_message() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    if command -v logger >/dev/null 2>&1; then
+        logger -t Json-Server -p user.info "$msg" 2>/dev/null || true
+    fi
+    
+    if command -v synologset1 >/dev/null 2>&1; then
+        synologset1 sys info 0x11800000 "[JSON Server] $msg" 2>/dev/null || true
+    fi
+    
+    local pkg_log_file="$PACKAGE_VAR_DIR/service.log"
+    if [ -n "$PACKAGE_VAR_DIR" ] && [ -w "$PACKAGE_VAR_DIR" ]; then
+        echo "[$timestamp] $msg" >> "$pkg_log_file" 2>/dev/null || true
+    fi
+}
+
+case $1 in
+	start)
+		if [ -f "$PID_FILE" ]; then
+			OLD_PID=$(cat "$PID_FILE")
+			if ps -p "$OLD_PID" > /dev/null 2>&1; then
+				if ps -p "$OLD_PID" -o args= 2>/dev/null | grep -q "json-server"; then
+					echo "JSON Server is already running (PID: $OLD_PID)" > $SYNOPKG_TEMP_LOGFILE
+					exit 0
+				fi
+			fi
+			rm -f "$PID_FILE"
+		fi
+		
+		# Verify script exists
+		if [ ! -f "$SCRIPT_PATH" ]; then
+			echo "ERROR: Script not found: $SCRIPT_PATH" > $SYNOPKG_TEMP_LOGFILE
+			exit 1
+		fi
+		
+		# Verify Node.js exists
+		if ! command -v "$NODE_CMD" > /dev/null 2>&1; then
+			echo "ERROR: Node.js not found: $NODE_CMD" > $SYNOPKG_TEMP_LOGFILE
+			exit 1
+		fi
+		
+		# Ensure log directory exists
+		LOG_DIR="$(dirname "$LOG_FILE")"
+		if [ ! -d "$LOG_DIR" ]; then
+			mkdir -p "$LOG_DIR" 2>/dev/null || {
+				LOG_FILE="/tmp/json-server.log"
+				LOG_DIR="/tmp"
+			}
+		fi
+		
+		# Test if log file is writable
+		if ! touch "$LOG_FILE" 2>/dev/null; then
+			LOG_FILE="/tmp/json-server.log"
+			LOG_DIR="/tmp"
+		fi
+		
+		# Start the process with environment variables
+		export PACKAGE_VAR_DIR="$PACKAGE_VAR_DIR"
+		"$NODE_CMD" "$SCRIPT_PATH" >> "$LOG_FILE" 2>&1 &
+		START_PID=$!
+		
+		# Wait a moment for the process to start
+		sleep 2
+		
+		# Find the actual Node.js process
+		ACTUAL_PID=$(ps aux 2>/dev/null | grep -v grep | grep "json-server-start.js" | awk '{print $2}' | head -n 1)
+		
+		if [ -n "$ACTUAL_PID" ] && [ "$ACTUAL_PID" != "$$" ]; then
+			PID=$ACTUAL_PID
+		else
+			if ps -p "$START_PID" > /dev/null 2>&1; then
+				if ps -p "$START_PID" -o args= 2>/dev/null | grep -q "json-server"; then
+					PID=$START_PID
+				fi
+			fi
+		fi
+		
+		# If we have a valid PID, save it
+		if [ -n "$PID" ] && ps -p "$PID" > /dev/null 2>&1; then
+			PID_DIR="$(dirname "$PID_FILE")"
+			if [ ! -d "$PID_DIR" ]; then
+				mkdir -p "$PID_DIR" 2>/dev/null || {
+					PID_FILE="/tmp/json-server.pid"
+				}
+			fi
+			if ! echo $PID > "$PID_FILE" 2>/dev/null; then
+				PID_FILE="/tmp/json-server.pid"
+				echo $PID > "$PID_FILE" 2>/dev/null || true
+			fi
+			_log_message "Service started successfully (PID: $PID)"
+			exit 0
+		else
+			_log_message "ERROR: Failed to start service"
+			echo "ERROR: Failed to start JSON Server" > $SYNOPKG_TEMP_LOGFILE
+			echo "Log file location: $LOG_FILE" >> $SYNOPKG_TEMP_LOGFILE
+			if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+				echo "" >> $SYNOPKG_TEMP_LOGFILE
+				echo "Last 30 lines of log:" >> $SYNOPKG_TEMP_LOGFILE
+				tail -n 30 "$LOG_FILE" >> $SYNOPKG_TEMP_LOGFILE 2>&1 || true
+			fi
+			rm -f "$PID_FILE"
+			exit 1
+		fi
+	;;
+	stop)
+		if [ ! -f "$PID_FILE" ]; then
+			echo "JSON Server is not running" > $SYNOPKG_TEMP_LOGFILE
+			exit 0
+		fi
+		
+		PID=$(cat "$PID_FILE")
+		if ps -p "$PID" > /dev/null 2>&1; then
+			kill "$PID"
+			for i in 1 2 3 4 5; do
+				if ! ps -p "$PID" > /dev/null 2>&1; then
+					break
+				fi
+				sleep 1
+			done
+			if ps -p "$PID" > /dev/null 2>&1; then
+				kill -9 "$PID"
+			fi
+		fi
+		rm -f "$PID_FILE"
+		_log_message "Service stopped"
+		exit 0
+	;;
+	status)
+		if [ ! -f "$PID_FILE" ]; then
+			exit 1
+		fi
+		PID=$(cat "$PID_FILE" 2>/dev/null)
+		if [ -z "$PID" ] || ! ps -p "$PID" > /dev/null 2>&1; then
+			rm -f "$PID_FILE"
+			exit 1
+		fi
+		exit 0
+	;;
+esac

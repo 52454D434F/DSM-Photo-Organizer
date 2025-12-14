@@ -3,8 +3,16 @@
 
 set -e  # Exit on error
 
-VERSION_FILE="source/PhotoOrganizer/VERSION"
-PKGCREATE_SCRIPT="./pkgscripts-ng/PkgCreate.py"
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Calculate paths relative to script location
+# Script is in source/JsonServer/, so:
+# - VERSION is in the same directory as the script
+# - pkgscripts-ng is two levels up (../../pkgscripts-ng/)
+VERSION_FILE="$SCRIPT_DIR/VERSION"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PKGCREATE_SCRIPT="$PROJECT_ROOT/pkgscripts-ng/PkgCreate.py"
 
 # Check if VERSION file exists
 if [ ! -f "$VERSION_FILE" ]; then
@@ -15,10 +23,10 @@ fi
 # Read current version
 CURRENT_VERSION=$(cat "$VERSION_FILE" | tr -d '\n\r ')
 
-# Validate version format (should be like "1.0.1-00020")
+# Validate version format (should be like "1.0.0-00001")
 if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9]{5}$ ]]; then
     echo "Error: Invalid version format: $CURRENT_VERSION"
-    echo "Expected format: MAJOR.MINOR.PATCH-BUILD (e.g., 1.0.1-00020)"
+    echo "Expected format: MAJOR.MINOR.PATCH-BUILD (e.g., 1.0.0-00001)"
     exit 1
 fi
 
@@ -48,5 +56,4 @@ fi
 
 # Run package creation
 echo "Running package creation..."
-python3 "$PKGCREATE_SCRIPT" -v 7.2 -c PhotoOrganizer
-
+python3 "$PKGCREATE_SCRIPT" -v 7.2 -c JsonServer

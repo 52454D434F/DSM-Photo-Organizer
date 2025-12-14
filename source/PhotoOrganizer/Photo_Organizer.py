@@ -697,8 +697,8 @@ def get_video_taken_date(video_path):
             # mutagen not available, will fall back to file date
             pass
     except Exception as e:
-        # Error reading video metadata, will fall back to file date
-        pass
+            # Error reading video metadata, will fall back to file date
+            pass
     return None
 
 def get_exif_taken_date(image_path):
@@ -1312,6 +1312,42 @@ def process_photo(file_path):
                 return
             
             # No duplicate found in Duplicates folder, proceed with moving
+            # Check if file_to_move actually exists before attempting to move it
+            if not os.path.exists(file_to_move):
+                # File doesn't exist - if we were going to move destination, just move source to destination
+                if file_to_move == dest_path:
+                    try:
+                        file_size = os.path.getsize(file_path)
+                        shutil.move(file_path, dest_path)
+                        # Update statistics IMMEDIATELY after move to ensure it's counted even if logging fails
+                        stats["files_moved_to_destination"] += 1
+                        stats["bytes_moved_to_destination"] += file_size
+                        bytes_moved += file_size  # Legacy compatibility
+                        save_statistics_if_needed()
+                        
+                        # Format destination path for log
+                        try:
+                            dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
+                            log_file_event("File moved", file_path, dest_path, file_size, f"Destination file no longer exists, moved source to {dest_format}")
+                        except Exception as log_error:
+                            # Logging failed, but file was moved and stats were updated
+                            try:
+                                log_file_event("Error", file_path, dest_path, None, f"File moved successfully but logging failed: {log_error}")
+                            except Exception:
+                                pass
+                        
+                        # Update Synology indexer (non-critical, can fail without affecting stats)
+                        try:
+                            update_synology_indexer(old_path=file_path, new_path=dest_path)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        log_file_event("Error", file_path, dest_path, None, f"Error moving source to destination: {e}")
+                else:
+                    # Source file doesn't exist, nothing to do
+                    log_file_event("Error", file_to_move, None, None, f"File to move does not exist: {file_to_move}")
+                return
+            
             unique_filename = get_unique_duplicate_filename(duplicates_folder, file_name, media_datetime)
             duplicates_path = os.path.join(duplicates_folder, unique_filename)
             
