@@ -6,11 +6,11 @@
 ### ex. create database, create symbolic link...
 
 # Primary location for run-as: package
-APP_DIR="/var/packages/Json-Server/target/usr/local/Json-Server"
-PACKAGE_VAR_DIR="/var/packages/Json-Server"
+APP_DIR="/var/packages/JsonServer/target/usr/local/JsonServer"
+PACKAGE_VAR_DIR="/var/packages/JsonServer"
 NODE_MODULES_DIR="$PACKAGE_VAR_DIR/node_modules"
 
-# Check if /var/packages/Json-Server is writable, if not use package destination
+# Check if /var/packages/JsonServer is writable, if not use package destination
 if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
     if [ -n "$SYNOPKG_PKGDEST" ]; then
         PACKAGE_VAR_DIR="$SYNOPKG_PKGDEST/var"
@@ -27,17 +27,17 @@ _log_message() {
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
     if command -v logger >/dev/null 2>&1; then
-        logger -t Json-Server -p user.info "$msg" 2>/dev/null || true
+        logger -t JsonServer -p user.info "$msg" 2>/dev/null || true
     fi
     
     if command -v synologset1 >/dev/null 2>&1; then
         synologset1 sys info 0x11800000 "[JSON Server] $msg" 2>/dev/null || true
     fi
     
-    local pkg_log_file="/var/packages/Json-Server/var/install.log"
-    if [ -L "/var/packages/Json-Server/var" ] || [ -d "/var/packages/Json-Server/var" ]; then
-        mkdir -p "/var/packages/Json-Server/var" 2>/dev/null || true
-        if [ -w "/var/packages/Json-Server/var" ]; then
+    local pkg_log_file="/var/packages/JsonServer/var/install.log"
+    if [ -L "/var/packages/JsonServer/var" ] || [ -d "/var/packages/JsonServer/var" ]; then
+        mkdir -p "/var/packages/JsonServer/var" 2>/dev/null || true
+        if [ -w "/var/packages/JsonServer/var" ]; then
             echo "[$timestamp] $msg" >> "$pkg_log_file" 2>/dev/null || true
         fi
     fi
@@ -93,7 +93,7 @@ fi
 # Check if wizard values are provided (pkgwizard variables are set during install/upgrade with WIZARD_UIFILES)
 # If any wizard variable is set, we'll use wizard values; otherwise preserve existing config or use defaults
 WIZARD_VALUES_PROVIDED=false
-if [ -n "$pkgwizard_UI_PORT" ] || [ -n "$pkgwizard_DB_PATH" ] || [ -n "$pkgwizard_DB_FILENAME" ]; then
+if [ -n "$pkgwizard_UI_PORT" ] || [ -n "$pkgwizard_DB_PATH" ] || [ -n "$pkgwizard_DB_FILENAME" ] || [ -n "$pkgwizard_DB_CONTENT" ]; then
     WIZARD_VALUES_PROVIDED=true
 fi
 
@@ -105,10 +105,10 @@ if [ -z "$PORT" ] || [ "$PORT" = "" ]; then
 fi
 
 # Apply wizard settings: database file path
-DB_PATH="${pkgwizard_DB_PATH:-/var/packages/Json-Server/var/data}"
+DB_PATH="${pkgwizard_DB_PATH:-/var/packages/JsonServer/var/data}"
 DB_PATH=$(echo "$DB_PATH" | tr -d ' ')
 if [ -z "$DB_PATH" ] || [ "$DB_PATH" = "" ]; then
-    DB_PATH="/var/packages/Json-Server/var/data"
+    DB_PATH="/var/packages/JsonServer/var/data"
 fi
 # Remove trailing slashes
 DB_PATH=$(echo "$DB_PATH" | sed 's:/*$::')
@@ -161,20 +161,54 @@ else
     fi
 fi
 
-# Copy default db.json if it doesn't exist at the configured location
+# Create db.json if it doesn't exist at the configured location
 if [ ! -f "$DB_FILE" ]; then
-    if [ -f "$APP_DIR/db.json" ]; then
-        # Ensure the directory exists before copying
-        DB_DIR=$(dirname "$DB_FILE")
-        mkdir -p "$DB_DIR" 2>/dev/null || true
+    DB_DIR=$(dirname "$DB_FILE")
+    mkdir -p "$DB_DIR" 2>/dev/null || true
+    
+    # Check if wizard provided custom database content
+    if [ -n "$pkgwizard_DB_CONTENT" ] && [ "$pkgwizard_DB_CONTENT" != "" ]; then
+        # Write wizard-provided content to db.json
+        # Validate it's valid JSON before writing
+        TEMP_JSON="/tmp/json_server_wizard_content.json"
+        echo "$pkgwizard_DB_CONTENT" > "$TEMP_JSON" 2>/dev/null
+        if "$NODE_CMD" -e "JSON.parse(require('fs').readFileSync('$TEMP_JSON', 'utf-8'))" 2>/dev/null; then
+            mv "$TEMP_JSON" "$DB_FILE" 2>/dev/null || {
+                cp "$TEMP_JSON" "$DB_FILE" 2>/dev/null
+                rm -f "$TEMP_JSON" 2>/dev/null
+            }
+            _log_message "Database file created with wizard-provided content at $DB_FILE"
+        else
+            rm -f "$TEMP_JSON" 2>/dev/null
+            echo "ERROR: Invalid JSON provided in wizard DB_CONTENT field" >> $SYNOPKG_TEMP_LOGFILE
+            _log_message "ERROR: Invalid JSON in wizard DB_CONTENT, using default db.json"
+            # Fall through to use default
+            if [ -f "$APP_DIR/db.json" ]; then
+                cp "$APP_DIR/db.json" "$DB_FILE"
+                _log_message "Default db.json copied to $DB_FILE"
+            fi
+        fi
+    elif [ -f "$APP_DIR/db.json" ]; then
+        # Use default db.json from package
         cp "$APP_DIR/db.json" "$DB_FILE"
         _log_message "Default db.json copied to $DB_FILE"
+    else
+        # Fallback: create minimal default db.json
+        echo '{"posts":[],"comments":[],"profile":{}}' > "$DB_FILE"
+        _log_message "Minimal default db.json created at $DB_FILE"
     fi
 fi
 
 # Install json-server globally or locally
 # Try to install in node_modules directory
 cd "$PACKAGE_VAR_DIR"
+
+# Clean up any problematic npm cache directories that might have permission issues
+# Check for npm cache in package home directory
+if [ -d "$PACKAGE_VAR_DIR/.npm" ]; then
+    # Try to remove if it has permission issues, but don't fail if we can't
+    rm -rf "$PACKAGE_VAR_DIR/.npm" 2>/dev/null || true
+fi
 
 # Create package.json if it doesn't exist
 if [ ! -f "$PACKAGE_VAR_DIR/package.json" ]; then
@@ -192,11 +226,28 @@ fi
 
 # Install json-server
 _log_message "Installing json-server..."
+
+# Create npm cache directory that package user can write to
+NPM_CACHE_DIR="$PACKAGE_VAR_DIR/.npm-cache"
+mkdir -p "$NPM_CACHE_DIR" 2>/dev/null || true
+
+# Fix any existing npm cache issues by using a clean cache directory
+# Set npm to use our writable cache directory
+export npm_config_cache="$NPM_CACHE_DIR"
+export NPM_CONFIG_CACHE="$NPM_CACHE_DIR"
+
+# Also set HOME to package var dir to avoid issues with .npm in user home
+export HOME="$PACKAGE_VAR_DIR"
+
 # Suppress npm notices (funding, update notifications) but keep errors/warnings
-NPM_CONFIG_UPDATE_NOTIFIER=false "$NPM_CMD" install json-server --prefix "$PACKAGE_VAR_DIR" --no-fund --loglevel=warn >> $SYNOPKG_TEMP_LOGFILE 2>&1
+# Use --cache flag to explicitly set cache location
+NPM_CONFIG_UPDATE_NOTIFIER=false "$NPM_CMD" install json-server --prefix "$PACKAGE_VAR_DIR" --cache "$NPM_CACHE_DIR" --no-fund --loglevel=warn >> $SYNOPKG_TEMP_LOGFILE 2>&1
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to install json-server" >> $SYNOPKG_TEMP_LOGFILE
     _log_message "ERROR: Failed to install json-server"
+    # Try to provide helpful error message
+    echo "If this is a permission error, try:" >> $SYNOPKG_TEMP_LOGFILE
+    echo "  sudo chown -R $(whoami) \"$NPM_CACHE_DIR\"" >> $SYNOPKG_TEMP_LOGFILE
     exit 1
 fi
 

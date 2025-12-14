@@ -20,8 +20,8 @@
 			"subitems": [{
 				"key": "DB_PATH",
 				"desc": "Directory to store database file",
-				"emptyText": "/var/packages/Json-Server/var/data",
-				"defaultValue": "/var/packages/Json-Server/var/data"
+				"emptyText": "/var/packages/JsonServer/var/data",
+				"defaultValue": "/var/packages/JsonServer/var/data"
 			}]
 		}, {
 			"type": "textfield",
@@ -31,20 +31,6 @@
 				"desc": "Database file name",
 				"emptyText": "db.json",
 				"defaultValue": "db.json"
-			}]
-		}]
-	},
-	{
-		"step_title": "Database Content",
-		"items": [{
-			"type": "textarea",
-			"desc": "Initial database content (JSON). Leave empty to use default db.json from package.",
-			"subitems": [{
-				"key": "DB_CONTENT",
-				"desc": "JSON content for db.json file",
-				"type": "textarea",
-				"emptyText": "Leave empty to use default",
-				"defaultValue": ""
 			}]
 		}]
 	}

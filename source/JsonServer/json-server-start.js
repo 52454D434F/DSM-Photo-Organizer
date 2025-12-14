@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * JSON Server Start Script
- * Reads config.ini and starts json-server with the configured settings
+    * JSON Server Start Script
+ * Reads config.ini and starts jsonserver with the configured settings
  */
 
 const fs = require('fs');
@@ -9,7 +9,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 // Default paths
-const PACKAGE_VAR_DIR = process.env.PACKAGE_VAR_DIR || '/var/packages/Json-Server/var';
+const PACKAGE_VAR_DIR = process.env.PACKAGE_VAR_DIR || '/var/packages/JsonServer/var';
 const CONFIG_FILE = path.join(PACKAGE_VAR_DIR, 'config.ini');
 const DATA_DIR = path.join(PACKAGE_VAR_DIR, 'data');
 const DEFAULT_DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -110,22 +110,28 @@ function ensureDbFile(dbPath) {
     }
 }
 
-// Find json-server binary
+// Find json-server binary and return both the command and args
 function findJsonServer() {
-    // Try local node_modules first
+    // Try local node_modules .bin first (usually a symlink or script)
     const localBin = path.join(PACKAGE_VAR_DIR, 'node_modules', '.bin', 'json-server');
     if (fs.existsSync(localBin)) {
-        return localBin;
+        return { command: localBin, args: [] };
+    }
+    
+    // Try alternative local path - use node to run the script directly
+    const localBinAlt = path.join(PACKAGE_VAR_DIR, 'node_modules', 'json-server', 'lib', 'bin.js');
+    if (fs.existsSync(localBinAlt)) {
+        return { command: process.execPath, args: [localBinAlt] };
     }
     
     // Try global installation
     const globalBin = '/usr/local/bin/json-server';
     if (fs.existsSync(globalBin)) {
-        return globalBin;
+        return { command: globalBin, args: [] };
     }
     
     // Try to find in PATH
-    return 'json-server';
+    return { command: 'json-server', args: [] };
 }
 
 // Main function
@@ -146,11 +152,12 @@ function main() {
     }
     
     // Find json-server binary
-    const jsonServerBin = findJsonServer();
+    const { command: jsonServerBin, args: jsonServerArgs } = findJsonServer();
     console.log(`Using json-server: ${jsonServerBin}`);
     
-    // Start json-server
+    // Build arguments
     const args = [
+        ...jsonServerArgs,
         config.dbFile,
         '--port', config.port.toString(),
         '--host', '0.0.0.0'  // Listen on all interfaces
@@ -165,6 +172,11 @@ function main() {
     
     child.on('error', (error) => {
         console.error(`Failed to start json-server: ${error.message}`);
+        console.error(`Attempted command: ${jsonServerBin} ${args.join(' ')}`);
+        console.error(`PACKAGE_VAR_DIR: ${PACKAGE_VAR_DIR}`);
+        console.error(`Checking paths:`);
+        console.error(`  .bin/json-server: ${fs.existsSync(path.join(PACKAGE_VAR_DIR, 'node_modules', '.bin', 'json-server'))}`);
+        console.error(`  lib/bin.js: ${fs.existsSync(path.join(PACKAGE_VAR_DIR, 'node_modules', 'json-server', 'lib', 'bin.js'))}`);
         process.exit(1);
     });
     

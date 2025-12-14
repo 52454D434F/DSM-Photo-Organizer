@@ -2,21 +2,21 @@
 # Copyright (C) 2000-2020 Synology Inc. All rights reserved.
 
 # Use package var directory for PID file
-if [ -d "/var/packages/Json-Server/var" ]; then
-    PID_FILE="/var/packages/Json-Server/var/json-server.pid"
+if [ -d "/var/packages/JsonServer/var" ]; then
+    PID_FILE="/var/packages/JsonServer/var/json-server.pid"
 else
     PID_FILE="/var/run/json-server.pid"
 fi
 
 # Primary location for run-as: package
-APP_DIR="/var/packages/Json-Server/target/usr/local/Json-Server"
-PACKAGE_VAR_DIR="/var/packages/Json-Server"
+APP_DIR="/var/packages/JsonServer/target/usr/local/JsonServer"
+PACKAGE_VAR_DIR="/var/packages/JsonServer"
 NODE_MODULES_DIR="$PACKAGE_VAR_DIR/node_modules"
 CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
 DATA_DIR="$PACKAGE_VAR_DIR/data"
-LOG_FILE="/var/packages/Json-Server/var/json-server.log"
+LOG_FILE="/var/packages/JsonServer/var/json-server.log"
 
-# Check if /var/packages/Json-Server is writable, if not use package destination
+# Check if /var/packages/JsonServer is writable, if not use package destination
 if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
     if [ -n "$SYNOPKG_PKGDEST" ]; then
         PACKAGE_VAR_DIR="$SYNOPKG_PKGDEST/var"
@@ -60,7 +60,7 @@ fi
 
 SCRIPT_PATH="$APP_DIR/json-server-start.js"
 if [ ! -f "$SCRIPT_PATH" ]; then
-    SCRIPT_PATH="/volume1/@appstore/Json-Server/usr/local/Json-Server/json-server-start.js"
+    SCRIPT_PATH="/volume1/@appstore/JsonServer/usr/local/JsonServer/json-server-start.js"
 fi
 
 # Logging function
@@ -69,7 +69,7 @@ _log_message() {
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
     if command -v logger >/dev/null 2>&1; then
-        logger -t Json-Server -p user.info "$msg" 2>/dev/null || true
+        logger -t JsonServer -p user.info "$msg" 2>/dev/null || true
     fi
     
     if command -v synologset1 >/dev/null 2>&1; then

@@ -11,7 +11,7 @@ source /pkgscripts/include/pkg_util.sh
 
 create_package_tgz() {
 	local package_tgz_dir=/tmp/_package_tgz
-	local app_dir=$package_tgz_dir/usr/local/Json-Server
+	local app_dir=$package_tgz_dir/usr/local/JsonServer
 	local bin_dir=$package_tgz_dir/usr/local/bin
 
 	### clear destination directory
@@ -70,7 +70,7 @@ create_package_tgz() {
 	ls -la $app_dir/ >&2 || true
 	
 	# Create symlink for easy access
-	ln -sf /usr/local/Json-Server/json-server-start.js $bin_dir/json-server
+	ln -sf /usr/local/JsonServer/json-server-start.js $bin_dir/json-server
 
 	### Verify package structure before creating package.tgz
 	echo "Verifying package structure..." >&2

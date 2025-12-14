@@ -9,12 +9,12 @@ VERSION_FILE="$PROJECT_ROOT/VERSION"
 
 # 2. If not found, try installed location (for runtime)
 if [ ! -f "$VERSION_FILE" ]; then
-    VERSION_FILE="/var/packages/Json-Server/target/usr/local/Json-Server/VERSION"
+    VERSION_FILE="/var/packages/JsonServer/target/usr/local/JsonServer/VERSION"
 fi
 
 # 3. If still not found, try alternative installed location
 if [ ! -f "$VERSION_FILE" ]; then
-    VERSION_FILE="/volume1/@appstore/Json-Server/usr/local/Json-Server/VERSION"
+    VERSION_FILE="/volume1/@appstore/JsonServer/usr/local/JsonServer/VERSION"
 fi
 
 # Load version

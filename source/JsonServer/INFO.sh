@@ -11,7 +11,7 @@ else
     version="1.0.0-00001"  # Fallback
 fi
 
-package="Json-Server"
+package="JsonServer"
 displayname="JSON Server"
 os_min_ver="7.0-40000"
 maintainer="M -- O --- R .-. C -.-. E ."
