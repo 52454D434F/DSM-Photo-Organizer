@@ -79,43 +79,98 @@ if command -v npm18 >/dev/null 2>&1; then
     NPM_CMD="npm18"
 fi
 
-# Create data directory for db.json
+# Create data directory for db.json (default location, may be overridden by wizard)
 DATA_DIR="$PACKAGE_VAR_DIR/data"
 mkdir -p "$DATA_DIR" 2>/dev/null || true
 
-# Copy default db.json if it doesn't exist
-if [ ! -f "$DATA_DIR/db.json" ]; then
-    if [ -f "$APP_DIR/db.json" ]; then
-        cp "$APP_DIR/db.json" "$DATA_DIR/db.json"
-        _log_message "Default db.json copied to $DATA_DIR"
-    fi
+# Copy or create config.ini
+CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
+CONFIG_EXISTS=false
+if [ -f "$CONFIG_FILE" ]; then
+    CONFIG_EXISTS=true
+fi
+
+# Check if wizard values are provided (pkgwizard variables are set during install/upgrade with WIZARD_UIFILES)
+# If any wizard variable is set, we'll use wizard values; otherwise preserve existing config or use defaults
+WIZARD_VALUES_PROVIDED=false
+if [ -n "$pkgwizard_UI_PORT" ] || [ -n "$pkgwizard_DB_PATH" ] || [ -n "$pkgwizard_DB_FILENAME" ]; then
+    WIZARD_VALUES_PROVIDED=true
 fi
 
 # Apply wizard settings: port number
-PORT="${wizard_UI_PORT:-3000}"
+PORT="${pkgwizard_UI_PORT:-3000}"
 PORT=$(echo "$PORT" | tr -d ' ')
 if [ -z "$PORT" ] || [ "$PORT" = "" ]; then
     PORT=3000
 fi
 
-# Copy or create config.ini
-CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
-if [ ! -f "$CONFIG_FILE" ]; then
-    if [ -f "$APP_DIR/config.ini" ]; then
-        cp "$APP_DIR/config.ini" "$CONFIG_FILE"
-        _log_message "Default config.ini copied to $CONFIG_FILE"
+# Apply wizard settings: database file path
+DB_PATH="${pkgwizard_DB_PATH:-/var/packages/Json-Server/var/data}"
+DB_PATH=$(echo "$DB_PATH" | tr -d ' ')
+if [ -z "$DB_PATH" ] || [ "$DB_PATH" = "" ]; then
+    DB_PATH="/var/packages/Json-Server/var/data"
+fi
+# Remove trailing slashes
+DB_PATH=$(echo "$DB_PATH" | sed 's:/*$::')
+
+# Apply wizard settings: database file name
+DB_FILENAME="${pkgwizard_DB_FILENAME:-db.json}"
+DB_FILENAME=$(echo "$DB_FILENAME" | tr -d ' ')
+if [ -z "$DB_FILENAME" ] || [ "$DB_FILENAME" = "" ]; then
+    DB_FILENAME="db.json"
+fi
+
+# Construct full database file path
+DB_FILE="$DB_PATH/$DB_FILENAME"
+
+# Create database directory if it doesn't exist
+mkdir -p "$DB_PATH" 2>/dev/null || {
+    echo "ERROR: Failed to create database directory: $DB_PATH" >> $SYNOPKG_TEMP_LOGFILE
+    _log_message "ERROR: Failed to create database directory: $DB_PATH"
+    # Fallback to default location
+    DB_PATH="$DATA_DIR"
+    DB_FILE="$DATA_DIR/$DB_FILENAME"
+    mkdir -p "$DB_PATH" 2>/dev/null || true
+}
+
+# Update config.ini with wizard settings
+# If wizard values were provided or config doesn't exist, create/update it
+# Otherwise, preserve existing config during upgrades
+if [ "$WIZARD_VALUES_PROVIDED" = "true" ] || [ "$CONFIG_EXISTS" = "false" ]; then
+    {
+        echo "[server]"
+        echo "port=$PORT"
+        echo ""
+        echo "[database]"
+        echo "db_file=$DB_FILE"
+    } > "$CONFIG_FILE"
+    if [ "$WIZARD_VALUES_PROVIDED" = "true" ]; then
+        _log_message "Configuration file updated with wizard settings: port $PORT, database file $DB_FILE"
+    else
+        _log_message "Configuration file created with default settings: port $PORT, database file $DB_FILE"
+    fi
+else
+    # Read existing config to get current values for logging and to know where db.json should be
+    if [ -f "$CONFIG_FILE" ]; then
+        EXISTING_PORT=$(grep -E "^port=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ' || echo "unknown")
+        EXISTING_DB=$(grep -E "^db_file=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ' || echo "")
+        if [ -n "$EXISTING_DB" ] && [ "$EXISTING_DB" != "unknown" ]; then
+            DB_FILE="$EXISTING_DB"
+        fi
+        _log_message "Existing configuration preserved: port $EXISTING_PORT, database file $DB_FILE"
     fi
 fi
 
-# Update config.ini with wizard settings
-{
-    echo "[server]"
-    echo "port=$PORT"
-    echo ""
-    echo "[database]"
-    echo "db_file=$DATA_DIR/db.json"
-} > "$CONFIG_FILE"
-_log_message "Configuration file created/updated at $CONFIG_FILE with port $PORT"
+# Copy default db.json if it doesn't exist at the configured location
+if [ ! -f "$DB_FILE" ]; then
+    if [ -f "$APP_DIR/db.json" ]; then
+        # Ensure the directory exists before copying
+        DB_DIR=$(dirname "$DB_FILE")
+        mkdir -p "$DB_DIR" 2>/dev/null || true
+        cp "$APP_DIR/db.json" "$DB_FILE"
+        _log_message "Default db.json copied to $DB_FILE"
+    fi
+fi
 
 # Install json-server globally or locally
 # Try to install in node_modules directory
@@ -154,7 +209,7 @@ JSON_SERVER_VER=$("$NODE_CMD" "$NODE_MODULES_DIR/.bin/json-server" --version 2>/
 
 _log_message "Package version: $PACKAGE_VERSION | Node.js: $NODE_VER | npm: $NPM_VER | json-server: $JSON_SERVER_VER"
 _log_message "Configuration file: $CONFIG_FILE"
-_log_message "Database file: $DATA_DIR/db.json"
+_log_message "Database file: $DB_FILE"
 _log_message "Server port: $PORT"
 _log_message "Installation completed successfully"
 

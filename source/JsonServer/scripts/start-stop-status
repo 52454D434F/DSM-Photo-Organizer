@@ -31,6 +31,9 @@ if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
     fi
 fi
 
+# Note: config.ini (set by wizard during installation) will be read by json-server-start.js
+# The config.ini contains the wizard-configured values: port and db_file
+
 # Find Node.js command
 NODE_CMD=""
 for node_cmd in node18 node nodejs; do
@@ -120,7 +123,11 @@ case $1 in
 		fi
 		
 		# Start the process with environment variables
+		# PACKAGE_VAR_DIR is used by json-server-start.js to locate config.ini
+		# The config.ini contains the wizard-configured values (port, db_file)
 		export PACKAGE_VAR_DIR="$PACKAGE_VAR_DIR"
+		export CONFIG_FILE="$CONFIG_FILE"
+		_log_message "Starting JSON Server with config from: $CONFIG_FILE"
 		"$NODE_CMD" "$SCRIPT_PATH" >> "$LOG_FILE" 2>&1 &
 		START_PID=$!
 		
