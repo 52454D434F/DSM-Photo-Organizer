@@ -91,14 +91,27 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 # Check if wizard values are provided (pkgwizard variables are set during install/upgrade with WIZARD_UIFILES)
-# If any wizard variable is set, we'll use wizard values; otherwise preserve existing config or use defaults
+# Wizard values always take priority when provided
 WIZARD_VALUES_PROVIDED=false
 if [ -n "$pkgwizard_UI_PORT" ] || [ -n "$pkgwizard_DB_PATH" ] || [ -n "$pkgwizard_DB_FILENAME" ] || [ -n "$pkgwizard_DB_CONTENT" ]; then
     WIZARD_VALUES_PROVIDED=true
+    _log_message "Wizard values detected - they will take priority over existing configuration"
+    # Debug: log which wizard values were provided
+    [ -n "$pkgwizard_UI_PORT" ] && _log_message "  Wizard UI_PORT: $pkgwizard_UI_PORT"
+    [ -n "$pkgwizard_DB_PATH" ] && _log_message "  Wizard DB_PATH: $pkgwizard_DB_PATH"
+    [ -n "$pkgwizard_DB_FILENAME" ] && _log_message "  Wizard DB_FILENAME: $pkgwizard_DB_FILENAME"
+    [ -n "$pkgwizard_DB_CONTENT" ] && _log_message "  Wizard DB_CONTENT: (provided)"
 fi
 
 # Apply wizard settings: port number
-PORT="${pkgwizard_UI_PORT:-3000}"
+# Wizard value always takes priority if provided
+if [ -n "$pkgwizard_UI_PORT" ]; then
+    PORT="$pkgwizard_UI_PORT"
+    _log_message "Using wizard port value: $PORT"
+else
+    PORT=3000
+    _log_message "Using default port: $PORT"
+fi
 PORT=$(echo "$PORT" | tr -d ' ')
 if [ -z "$PORT" ] || [ "$PORT" = "" ]; then
     PORT=3000
@@ -134,9 +147,11 @@ mkdir -p "$DB_PATH" 2>/dev/null || {
 }
 
 # Update config.ini with wizard settings
-# If wizard values were provided or config doesn't exist, create/update it
-# Otherwise, preserve existing config during upgrades
-if [ "$WIZARD_VALUES_PROVIDED" = "true" ] || [ "$CONFIG_EXISTS" = "false" ]; then
+# Wizard values ALWAYS take priority when provided, even during upgrades
+# If wizard values were provided, always update config.ini
+# Otherwise, only create/update if config doesn't exist (preserve existing config during upgrades without wizard)
+if [ "$WIZARD_VALUES_PROVIDED" = "true" ]; then
+    # Wizard values provided - ALWAYS use them (even if config exists)
     {
         echo "[server]"
         echo "port=$PORT"
@@ -144,20 +159,26 @@ if [ "$WIZARD_VALUES_PROVIDED" = "true" ] || [ "$CONFIG_EXISTS" = "false" ]; the
         echo "[database]"
         echo "db_file=$DB_FILE"
     } > "$CONFIG_FILE"
-    if [ "$WIZARD_VALUES_PROVIDED" = "true" ]; then
-        _log_message "Configuration file updated with wizard settings: port $PORT, database file $DB_FILE"
-    else
-        _log_message "Configuration file created with default settings: port $PORT, database file $DB_FILE"
-    fi
+    _log_message "Configuration file updated with wizard settings (wizard values take priority): port $PORT, database file $DB_FILE"
+elif [ "$CONFIG_EXISTS" = "false" ]; then
+    # No wizard values and no existing config - create with defaults
+    {
+        echo "[server]"
+        echo "port=$PORT"
+        echo ""
+        echo "[database]"
+        echo "db_file=$DB_FILE"
+    } > "$CONFIG_FILE"
+    _log_message "Configuration file created with default settings: port $PORT, database file $DB_FILE"
 else
-    # Read existing config to get current values for logging and to know where db.json should be
+    # No wizard values but config exists - preserve existing config during upgrades
     if [ -f "$CONFIG_FILE" ]; then
         EXISTING_PORT=$(grep -E "^port=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ' || echo "unknown")
         EXISTING_DB=$(grep -E "^db_file=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ' || echo "")
         if [ -n "$EXISTING_DB" ] && [ "$EXISTING_DB" != "unknown" ]; then
             DB_FILE="$EXISTING_DB"
         fi
-        _log_message "Existing configuration preserved: port $EXISTING_PORT, database file $DB_FILE"
+        _log_message "Existing configuration preserved (no wizard values provided): port $EXISTING_PORT, database file $DB_FILE"
     fi
 fi
 
