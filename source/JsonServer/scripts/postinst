@@ -21,34 +21,53 @@ if [ ! -d "$PACKAGE_VAR_DIR" ] || [ ! -w "$PACKAGE_VAR_DIR" ]; then
     fi
 fi
 
-# Logging function
+# Logging function with multiple fallback methods
 _log_message() {
     local msg="$1"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
+    # Method 1: Standard logger command (preferred - works via syslog, no file permissions needed)
     if command -v logger >/dev/null 2>&1; then
         logger -t JsonServer -p user.info "$msg" 2>/dev/null || true
     fi
     
+    # Method 1b: Synology-specific synologset1 (fallback if logger doesn't work)
+    # Format: synologset1 <facility> <level> <id> <message>
+    # 0x11800000 is a generic system info ID (empty category)
     if command -v synologset1 >/dev/null 2>&1; then
         synologset1 sys info 0x11800000 "[JSON Server] $msg" 2>/dev/null || true
     fi
     
+    # Method 2: Write to package-specific log file (always accessible to package user)
+    # On DSM, /var/packages/JsonServer/var is a symlink to /volume1/@appdata/JsonServer
     local pkg_log_file="/var/packages/JsonServer/var/install.log"
+    # Try the symlink location first
     if [ -L "/var/packages/JsonServer/var" ] || [ -d "/var/packages/JsonServer/var" ]; then
         mkdir -p "/var/packages/JsonServer/var" 2>/dev/null || true
         if [ -w "/var/packages/JsonServer/var" ]; then
             echo "[$timestamp] $msg" >> "$pkg_log_file" 2>/dev/null || true
         fi
     fi
+    # Fallback to PACKAGE_VAR_DIR if var symlink doesn't work
+    if [ -n "$PACKAGE_VAR_DIR" ] && [ "$PACKAGE_VAR_DIR" != "/var/packages/JsonServer/var" ]; then
+        local alt_log_file="$PACKAGE_VAR_DIR/install.log"
+        mkdir -p "$PACKAGE_VAR_DIR" 2>/dev/null || true
+        if [ -w "$PACKAGE_VAR_DIR" ]; then
+            echo "[$timestamp] $msg" >> "$alt_log_file" 2>/dev/null || true
+        fi
+    fi
+    
+    # Note: We don't write to SYNOPKG_TEMP_LOGFILE to avoid cluttering Package Center output
+    # All information is logged to system logs and package log files
 }
 
 # Load package version
 . "$(dirname "$0")/_version.sh" 2>/dev/null || PACKAGE_VERSION="1.0.0-00001"
 
+# Log installation start to system log
 _log_message "Starting installation: Package version $PACKAGE_VERSION"
 _log_message "Installation path: $APP_DIR"
-_log_message "Node modules: $NODE_MODULES_DIR"
+_log_message "Node modules directory: $NODE_MODULES_DIR"
 
 # Create package var directory
 mkdir -p "$PACKAGE_VAR_DIR" 2>>$SYNOPKG_TEMP_LOGFILE || {
@@ -90,24 +109,45 @@ if [ -f "$CONFIG_FILE" ]; then
     CONFIG_EXISTS=true
 fi
 
-# Check if wizard values are provided (pkgwizard variables are set during install/upgrade with WIZARD_UIFILES)
+# Check if wizard values are provided
+# Note: WIZARD_UIFILES may use either pkgwizard_* or wizard_* prefix
 # Wizard values always take priority when provided
+# Debug: Log all environment variables that start with pkgwizard or wizard to see what's available
+_log_message "Checking for wizard variables..."
+env | grep -E "^pkgwizard_|^wizard_" 2>/dev/null | while IFS='=' read -r key value; do
+    _log_message "  Found: $key=$value"
+done || _log_message "  No wizard variables found in environment"
+
 WIZARD_VALUES_PROVIDED=false
-if [ -n "$pkgwizard_UI_PORT" ] || [ -n "$pkgwizard_DB_PATH" ] || [ -n "$pkgwizard_DB_FILENAME" ] || [ -n "$pkgwizard_DB_CONTENT" ]; then
+# Check both pkgwizard_* (WIZARD_UIFILES format) and wizard_* (legacy/alternative format)
+if [ -n "$pkgwizard_UI_PORT" ] || [ -n "$wizard_UI_PORT" ] || \
+   [ -n "$pkgwizard_DB_PATH" ] || [ -n "$wizard_DB_PATH" ] || \
+   [ -n "$pkgwizard_DB_FILENAME" ] || [ -n "$wizard_DB_FILENAME" ] || \
+   [ -n "$pkgwizard_DB_CONTENT" ] || [ -n "$wizard_DB_CONTENT" ]; then
     WIZARD_VALUES_PROVIDED=true
     _log_message "Wizard values detected - they will take priority over existing configuration"
     # Debug: log which wizard values were provided
-    [ -n "$pkgwizard_UI_PORT" ] && _log_message "  Wizard UI_PORT: $pkgwizard_UI_PORT"
-    [ -n "$pkgwizard_DB_PATH" ] && _log_message "  Wizard DB_PATH: $pkgwizard_DB_PATH"
-    [ -n "$pkgwizard_DB_FILENAME" ] && _log_message "  Wizard DB_FILENAME: $pkgwizard_DB_FILENAME"
-    [ -n "$pkgwizard_DB_CONTENT" ] && _log_message "  Wizard DB_CONTENT: (provided)"
+    [ -n "$pkgwizard_UI_PORT" ] && _log_message "  Wizard UI_PORT (pkgwizard): $pkgwizard_UI_PORT"
+    [ -n "$wizard_UI_PORT" ] && _log_message "  Wizard UI_PORT (wizard): $wizard_UI_PORT"
+    [ -n "$pkgwizard_DB_PATH" ] && _log_message "  Wizard DB_PATH (pkgwizard): $pkgwizard_DB_PATH"
+    [ -n "$wizard_DB_PATH" ] && _log_message "  Wizard DB_PATH (wizard): $wizard_DB_PATH"
+    [ -n "$pkgwizard_DB_FILENAME" ] && _log_message "  Wizard DB_FILENAME (pkgwizard): $pkgwizard_DB_FILENAME"
+    [ -n "$wizard_DB_FILENAME" ] && _log_message "  Wizard DB_FILENAME (wizard): $wizard_DB_FILENAME"
+    [ -n "$pkgwizard_DB_CONTENT" ] && _log_message "  Wizard DB_CONTENT (pkgwizard): (provided)"
+    [ -n "$wizard_DB_CONTENT" ] && _log_message "  Wizard DB_CONTENT (wizard): (provided)"
+else
+    _log_message "No wizard values detected in either pkgwizard_* or wizard_* variables"
 fi
 
 # Apply wizard settings: port number
 # Wizard value always takes priority if provided
+# Try both pkgwizard_* and wizard_* formats (WIZARD_UIFILES may use either)
 if [ -n "$pkgwizard_UI_PORT" ]; then
     PORT="$pkgwizard_UI_PORT"
-    _log_message "Using wizard port value: $PORT"
+    _log_message "Using wizard port value (pkgwizard_UI_PORT): $PORT"
+elif [ -n "$wizard_UI_PORT" ]; then
+    PORT="$wizard_UI_PORT"
+    _log_message "Using wizard port value (wizard_UI_PORT): $PORT"
 else
     PORT=3000
     _log_message "Using default port: $PORT"
@@ -118,7 +158,17 @@ if [ -z "$PORT" ] || [ "$PORT" = "" ]; then
 fi
 
 # Apply wizard settings: database file path
-DB_PATH="${pkgwizard_DB_PATH:-/var/packages/JsonServer/var/data}"
+# Try both pkgwizard_* and wizard_* formats
+if [ -n "$pkgwizard_DB_PATH" ]; then
+    DB_PATH="$pkgwizard_DB_PATH"
+    _log_message "Using wizard DB_PATH (pkgwizard_DB_PATH): $DB_PATH"
+elif [ -n "$wizard_DB_PATH" ]; then
+    DB_PATH="$wizard_DB_PATH"
+    _log_message "Using wizard DB_PATH (wizard_DB_PATH): $DB_PATH"
+else
+    DB_PATH="/var/packages/JsonServer/var/data"
+    _log_message "Using default DB_PATH: $DB_PATH"
+fi
 DB_PATH=$(echo "$DB_PATH" | tr -d ' ')
 if [ -z "$DB_PATH" ] || [ "$DB_PATH" = "" ]; then
     DB_PATH="/var/packages/JsonServer/var/data"
@@ -127,7 +177,17 @@ fi
 DB_PATH=$(echo "$DB_PATH" | sed 's:/*$::')
 
 # Apply wizard settings: database file name
-DB_FILENAME="${pkgwizard_DB_FILENAME:-db.json}"
+# Try both pkgwizard_* and wizard_* formats
+if [ -n "$pkgwizard_DB_FILENAME" ]; then
+    DB_FILENAME="$pkgwizard_DB_FILENAME"
+    _log_message "Using wizard DB_FILENAME (pkgwizard_DB_FILENAME): $DB_FILENAME"
+elif [ -n "$wizard_DB_FILENAME" ]; then
+    DB_FILENAME="$wizard_DB_FILENAME"
+    _log_message "Using wizard DB_FILENAME (wizard_DB_FILENAME): $DB_FILENAME"
+else
+    DB_FILENAME="db.json"
+    _log_message "Using default DB_FILENAME: $DB_FILENAME"
+fi
 DB_FILENAME=$(echo "$DB_FILENAME" | tr -d ' ')
 if [ -z "$DB_FILENAME" ] || [ "$DB_FILENAME" = "" ]; then
     DB_FILENAME="db.json"
@@ -279,7 +339,14 @@ NODE_VER=$("$NODE_CMD" --version 2>&1 | sed 's/v//')
 NPM_VER=$("$NPM_CMD" --version 2>&1)
 JSON_SERVER_VER=$("$NODE_CMD" "$NODE_MODULES_DIR/.bin/json-server" --version 2>/dev/null || echo "N/A")
 
-_log_message "Package version: $PACKAGE_VERSION | Node.js: $NODE_VER | npm: $NPM_VER | json-server: $JSON_SERVER_VER"
+# Log detailed information to system log (visible in Log Center)
+# One item per line for better readability
+_log_message "Package version: $PACKAGE_VERSION"
+_log_message "Installation path: $APP_DIR"
+_log_message "Node modules directory: $NODE_MODULES_DIR"
+_log_message "Node.js version: $NODE_VER"
+_log_message "npm version: $NPM_VER"
+_log_message "json-server version: $JSON_SERVER_VER"
 _log_message "Configuration file: $CONFIG_FILE"
 _log_message "Database file: $DB_FILE"
 _log_message "Server port: $PORT"
