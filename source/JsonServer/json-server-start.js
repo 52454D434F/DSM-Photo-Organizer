@@ -70,8 +70,37 @@ function parseConfigFile(configPath) {
 function ensureDbFile(dbPath) {
     if (!fs.existsSync(dbPath)) {
         const dir = path.dirname(dbPath);
+        
+        // Check if directory exists
         if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
+            try {
+                fs.mkdirSync(dir, { recursive: true });
+            } catch (error) {
+                console.error(`ERROR: Cannot create directory ${dir}: ${error.message}`);
+                console.error(`Please ensure the directory exists and the package user has write permissions.`);
+                process.exit(1);
+            }
+        }
+        
+        // Check if we can write to the directory
+        try {
+            const testFile = path.join(dir, '.json-server-test-' + Date.now());
+            fs.writeFileSync(testFile, 'test');
+            fs.unlinkSync(testFile);
+        } catch (error) {
+            console.error(`ERROR: Cannot write to directory ${dir}: ${error.message}`);
+            console.error(`Permission denied. The JsonServer package user needs write access to this directory.`);
+            console.error(``);
+            console.error(`SOLUTION: Grant Read/Write permissions to the JsonServer user:`);
+            console.error(`  1. Open Control Panel > Shared Folder`);
+            console.error(`  2. Find the shared folder containing: ${dir}`);
+            console.error(`  3. Click Edit > Permissions tab`);
+            console.error(`  4. Select "System internal user"`);
+            console.error(`  5. Find "JsonServer" user and set to "Read/Write"`);
+            console.error(`  6. Click OK and restart the service`);
+            console.error(``);
+            console.error(`Alternative: Use the default location: /var/packages/JsonServer/var/data`);
+            process.exit(1);
         }
         
         // Default db.json content
@@ -105,8 +134,25 @@ function ensureDbFile(dbPath) {
             }
         };
         
-        fs.writeFileSync(dbPath, JSON.stringify(defaultDb, null, 2));
-        console.log(`Created default db.json at ${dbPath}`);
+        try {
+            fs.writeFileSync(dbPath, JSON.stringify(defaultDb, null, 2));
+            console.log(`Created default db.json at ${dbPath}`);
+        } catch (error) {
+            console.error(`ERROR: Cannot create database file ${dbPath}: ${error.message}`);
+            console.error(`Permission denied. The JsonServer package user needs write access.`);
+            console.error(`SOLUTION: Grant Read/Write permissions via Control Panel > Shared Folder > [folder] > Edit > Permissions > System internal user > JsonServer > Read/Write`);
+            process.exit(1);
+        }
+    } else {
+        // File exists, check if it's readable and writable (json-server needs to write to it)
+        try {
+            fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
+        } catch (error) {
+            console.error(`ERROR: Database file exists but is not readable/writable: ${dbPath}`);
+            console.error(`Permission denied. json-server needs write access to update the database.`);
+            console.error(`SOLUTION: Grant Read/Write permissions via Control Panel > Shared Folder > [folder] > Edit > Permissions > System internal user > JsonServer > Read/Write`);
+            process.exit(1);
+        }
     }
 }
 
@@ -159,6 +205,7 @@ function main() {
     const args = [
         ...jsonServerArgs,
         config.dbFile,
+        '--watch',  // Watch for file changes and reload automatically
         '--port', config.port.toString(),
         '--host', '0.0.0.0'  // Listen on all interfaces
     ];
