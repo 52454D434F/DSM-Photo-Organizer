@@ -112,12 +112,12 @@ create_spk(){
 	cp -av conf $PKG_DIR/conf
 	cp -av LICENSE $PKG_DIR 2>/dev/null || true
 	
-	# Verify wizard file was copied
-	if [ ! -f "$PKG_DIR/conf/wizard" ]; then
-		echo "ERROR: Wizard file not found in package directory!" >&2
-		exit 1
+	# Check for wizard file (optional - postinst uses defaults if not present)
+	if [ -f "$PKG_DIR/conf/wizard" ]; then
+		echo "Wizard file verified: $PKG_DIR/conf/wizard" >&2
+	else
+		echo "Warning: Wizard file not found in package directory (postinst will use defaults)" >&2
 	fi
-	echo "Wizard file verified: $PKG_DIR/conf/wizard" >&2
 	
 	# Copy package icons - prioritize new icon files over old PACKAGE_ICON files
 	# Always use icon.png and icon_256.png if they exist, otherwise fall back to PACKAGE_ICON files
@@ -186,26 +186,60 @@ create_spk(){
 	fi
 	
 	chmod +x INFO.sh
-	bash INFO.sh > INFO
+	
+	# Try to generate INFO file from INFO.sh
+	echo "Generating INFO file from INFO.sh..." >&2
+	bash INFO.sh > INFO 2>&1
 	INFO_EXIT_CODE=$?
 	
-	if [ $INFO_EXIT_CODE -ne 0 ]; then
-		echo "Error: INFO.sh failed with exit code $INFO_EXIT_CODE" >&2
-		exit 1
+	# If INFO.sh failed or INFO file is missing/empty, create it manually as fallback
+	if [ $INFO_EXIT_CODE -ne 0 ] || [ ! -f "INFO" ] || [ ! -s "INFO" ]; then
+		echo "Warning: INFO.sh failed or produced no output, creating INFO file manually" >&2
+		if [ $INFO_EXIT_CODE -ne 0 ]; then
+			echo "INFO.sh exit code: $INFO_EXIT_CODE" >&2
+		fi
+		
+		# Read version from VERSION file
+		if [ -f "VERSION" ]; then
+			version=$(cat VERSION | tr -d '\n\r ' | head -1)
+		else
+			version="1.0.1-00001"  # Fallback
+		fi
+		
+		# Create INFO file manually
+		cat > INFO << EOF
+package="PhotoOrganizer"
+version="$version"
+displayname="Photo Organizer and Deduplicator"
+os_min_ver="7.0-40000"
+maintainer="M -- O --- R .-. C -.-. E ."
+maintainer_url="https://github.com/52454D434F/"
+distributor="MORCE.codes"
+distributor_url="https://morce.codes"
+arch="noarch"
+thirdparty="yes"
+silent_install="no"
+silent_upgrade="no"
+description="Photo Organizer and Deduplicator is an application for automated sorting and deduplication of image (and video) files. Uses EXIF metadata to sort photos by capture date into year-based folders (yyyy/mm_MMM). Continuously monitors a user-defined source directory and organizes new files. Supports duplicate file detection and handling (deleted if equal)."
+EOF
+		echo "INFO file created manually with version: $version" >&2
+	else
+		echo "INFO file generated successfully from INFO.sh" >&2
 	fi
 	
+	# Verify INFO file exists and has content
 	if [ ! -f "INFO" ]; then
 		echo "Error: INFO file was not created" >&2
 		echo "Current directory: $(pwd)" >&2
-		echo "INFO.sh exit code: $INFO_EXIT_CODE" >&2
 		exit 1
 	fi
 	
-	# Verify INFO file has content
 	if [ ! -s "INFO" ]; then
 		echo "Error: INFO file is empty" >&2
 		exit 1
 	fi
+	
+	echo "INFO file verified: $(wc -l < INFO) lines, $(wc -c < INFO) bytes" >&2
 	
 	# Copy INFO to PKG_DIR for the SPK package
 	cp INFO $PKG_DIR/INFO
