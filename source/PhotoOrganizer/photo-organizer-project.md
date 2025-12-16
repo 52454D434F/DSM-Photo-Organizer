@@ -35,11 +35,24 @@ Photo Organizer and Deduplicator is a Synology NAS package that automatically or
 - **Duplicate Detection**: Uses MD5 hash comparison to identify exact duplicates, with configurable handling (delete or move to Duplicates folder)
 - **File Renaming**: Automatically renames files to consistent chronological format when date information is available
 
+### Recent Highlights
+
+> **🔴 Critical Fixes in Latest Versions:**
+> 
+> - **v1.0.1-00019**: Fixed critical statistics tracking bug - statistics now update immediately after file moves, ensuring 100% accuracy even if logging fails
+> - **v1.0.1-00018**: Fixed EXIF date extraction priority - photos now organized by actual capture date (nested ExifIFD tags) instead of file modification date
+> 
+> **✨ Major Improvements:**
+> 
+> - **Persistent Statistics**: JSON-based statistics tracking that persists across restarts (`Photo_Organizer_Statistics.json`)
+> - **Enhanced Date Detection**: Added CreateDate tag support and fixed priority order to use actual photo capture dates
+> - **Improved Logging**: Enhanced log entries with destination format information for better traceability
+
 ## Package Details
 
 ### Package Information
 - **Package Name**: PhotoOrganizer
-- **Version**: 1.0.1-00019
+- **Version**: 1.0.1-00026
 - **Display Name**: Photo Organizer and Deduplicator
 - **Architecture**: noarch (works on all Synology NAS models)
 - **Minimum DSM Version**: 7.0-40000
@@ -79,11 +92,44 @@ The project source code, build scripts, and documentation are available on GitHu
 ## Download
 
 ### Latest Version:
-[Download PhotoOrganizer-1.0.1-00019.spk](https://github.com/52454D434F/DSM-Photo-Organizer/blob/main/result_spk/PhotoOrganizer-1.0.1-00019/PhotoOrganizer-1.0.1-00019.spk)
+[Download PhotoOrganizer-1.0.1-00026.spk](https://github.com/52454D434F/DSM-Photo-Organizer/blob/main/result_spk/PhotoOrganizer-1.0.1-00026/PhotoOrganizer-1.0.1-00026.spk)
 
 **Recent Updates:**
-- **v1.0.1-00019**: Fixed critical statistics tracking bug ensuring all file moves are accurately counted
-- **v1.0.1-00018**: Fixed EXIF date extraction priority order, added CreateDate tag support, enhanced log entries
+
+- **v1.0.1-00026** (2025-12-XX)
+  - **Improved Indexer Reliability**: Enhanced error handling for Synology indexer operations with proper timeout management (5-second timeout)
+  - **Better Error Isolation**: Indexer failures no longer affect file operations - improved separation of concerns
+  - **Logging Refactoring**: Refactored logging in `update_synology_indexer` and related functions for improved reliability
+
+- **v1.0.1-00019** (2025-12-05) - **CRITICAL FIX**
+  - **Fixed Critical Statistics Tracking Bug**: Statistics are now updated immediately after file move operations complete, ensuring all file moves are accurately counted even if logging or Synology indexer operations fail
+  - Statistics update order changed: statistics update immediately after `shutil.move()` succeeds, before any logging or indexer operations
+  - Ensures data integrity: if a file is moved, it's always counted in statistics
+  - Applied to all file move operations (normal organization, unknown file types, file replacements)
+
+- **v1.0.1-00018** (2025-12-04) - **CRITICAL FIX**
+  - **Fixed EXIF Date Extraction Priority Order**: Now correctly prioritizes nested ExifIFD tags over top-level tags
+  - **New Priority Order** (highest to lowest):
+    1. Nested ExifIFD DateTimeOriginal (tag 0x9003) - **HIGHEST PRIORITY**
+    2. Nested ExifIFD DateTimeDigitized (tag 0x9004)
+    3. Nested ExifIFD CreateDate
+    4. Top-level DateTimeOriginal
+    5. Top-level DateTimeDigitized
+    6. Top-level CreateDate
+    7. Top-level DateTime (tag 0x0132) - **LOWEST PRIORITY**
+  - **Added CreateDate EXIF Tag Support**: Added support for extracting CreateDate tag from EXIF metadata (both top-level and nested ExifIFD)
+  - **Enhanced Log Entries**: All log entries now include destination file format information for better traceability
+  - **Impact**: Photos are now organized by their actual capture date, not when they were last modified
+
+- **v1.0.1-00017** (2025-12-03)
+  - **Persistent Statistics Tracking System**: Implemented JSON-based statistics file (`Photo_Organizer_Statistics.json`) that persists across restarts
+  - **Statistics Adjustment Logic**: Automatically adjusts statistics when files move between destination and duplicates folders
+  - **Improved Log File Naming**: 
+    - `Photo_Organizer.log` → `Photo_Organizer_Activities.log`
+    - `System.log` → `Photo_Organizer_Application.log`
+    - `statistics.json` → `Photo_Organizer_Statistics.json`
+  - **Fixed Mutagen Dependency Detection**: Properly detects mutagen when installed in virtual environment
+  - **Fixed Video Metadata Extraction**: Fixed MOV file metadata extraction (removed dependency on non-existent QuickTime module)
 
 ## File Processing Logic
 
@@ -99,13 +145,13 @@ The Photo Organizer uses a file system watcher to monitor the source directory a
    - **Images**: 
      - **Priority 1**: Nested ExifIFD `DateTimeOriginal` (tag 0x9003) - **HIGHEST PRIORITY** - Most accurate capture date
      - **Priority 2**: Nested ExifIFD `DateTimeDigitized` (tag 0x9004)
-     - **Priority 3**: Nested ExifIFD `CreateDate`
+     - **Priority 3**: Nested ExifIFD `CreateDate` *(Added in v1.0.1-00018)*
      - **Priority 4**: Top-level `DateTimeOriginal`
      - **Priority 5**: Top-level `DateTimeDigitized`
-     - **Priority 6**: Top-level `CreateDate`
+     - **Priority 6**: Top-level `CreateDate` *(Added in v1.0.1-00018)*
      - **Priority 7**: Top-level `DateTime` (tag 0x0132) - **LOWEST PRIORITY** - File modification date
      - Uses sophisticated multi-level EXIF parsing to handle different camera formats
-     - **Note**: Nested ExifIFD tags are prioritized over top-level tags to ensure actual photo capture date is used instead of file modification date
+     - > **🔴 Critical Fix (v1.0.1-00018)**: Nested ExifIFD tags are now correctly prioritized over top-level tags. This ensures **actual photo capture date is used instead of file modification date**. Previously, the script incorrectly checked top-level DateTime (file modification date) before nested DateTimeOriginal (actual capture date).
    - **Videos**: Attempts to read creation date from video metadata (MP4/MOV using mutagen library)
    - **Fallback**: Uses the older of file creation or modification timestamp (newer might have modifications)
 
@@ -134,7 +180,7 @@ The application uses multiple methods to extract date information in priority or
    - **Top-level tags (fallback)**: Reads `DateTimeOriginal`, `DateTimeDigitized`, `CreateDate`, and `DateTime` from top-level EXIF tags
    - **Priority order ensures actual photo capture date is used**: Nested ExifIFD tags contain the most accurate capture metadata and are checked first
    - Supports both modern and legacy Pillow methods for maximum camera compatibility
-   - **Critical fix (v1.0.1-00018)**: Fixed incorrect priority order that was using file modification date before actual capture date
+   - > **🔴 Critical Fix (v1.0.1-00018)**: Fixed incorrect priority order that was using file modification date before actual capture date. Now correctly prioritizes nested ExifIFD tags (actual capture date) over top-level tags (file modification date). Added support for `CreateDate` tag in both nested and top-level EXIF structures.
 2. **Video Metadata**: Reads creation date from MP4/MOV metadata using mutagen library, supporting ISO 8601 format.
 3. **File Timestamps**: Uses the older of creation or modification time, preserving sub-second precision when available.
 
@@ -167,7 +213,13 @@ The application maintains statistics about file operations, tracking files/bytes
 
 ### Statistics Accuracy
 
-**Critical fix (v1.0.1-00019)**: Statistics are now updated immediately after file move operations complete, ensuring all files are accurately counted even if logging or indexer operations fail. This guarantees data integrity: if a file is moved, it's always counted in statistics.
+> **🔴 Critical Fix (v1.0.1-00019)**: Statistics are now updated **immediately after file move operations complete**, ensuring all files are accurately counted even if logging or indexer operations fail. This guarantees data integrity: **if a file is moved, it's always counted in statistics**.
+> 
+> **What Changed:**
+> - Statistics update moved to execute immediately after `shutil.move()` succeeds
+> - Logging and indexer updates are wrapped in separate try-except blocks
+> - Non-critical operation failures (logging, indexer) no longer prevent statistics updates
+> - Applied to all file move operations: normal organization, unknown file types, and file replacements
 
 ### Statistics Data
 

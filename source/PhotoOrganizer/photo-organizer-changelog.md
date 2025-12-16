@@ -1,9 +1,50 @@
-# Changelog
++++
+date = '2025-12-05T14:23:59-06:00'
+draft = false
+title = 'Photo Organizer and Deduplicator - Changelog'
+tags = ['synology', 'dsm', 'photo-management', 'automation', 'python', 'package', 'Changelog']
+image = 'images/icon_256.png'
++++
+
+# Changelog for Photo Organizer and Deduplicator - Synology DSM 7 Package
 
 All notable changes to the Photo Organizer and Deduplicator project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.1-00026] - 2025-12-14
+
+### Changed
+- **Logging and Error Handling Refactoring**
+  - Refactored logging in `update_synology_indexer` and related functions
+  - Improved error handling for Synology indexer operations with proper timeout management (5-second timeout)
+  - Enhanced silent failure handling for non-critical operations (indexer updates don't affect file operations)
+  - Better separation of concerns between file operations and indexer updates
+
+### Fixed
+- **Indexer Operation Reliability**
+  - Improved `synoindex` command execution with proper timeout and error suppression
+  - Indexer operations now use `subprocess.run` with `check=False` and `stdout/stderr=DEVNULL` for silent operation
+  - Enhanced exception handling to prevent indexer failures from affecting file move operations
+
+### Technical Details
+- `update_synology_indexer` function improvements:
+  - Uses `subprocess.run` with 5-second timeout
+  - Proper error suppression with `stdout=DEVNULL` and `stderr=DEVNULL`
+  - Wrapped in try-except blocks to ensure file operations continue even if indexer fails
+  - Checks for `/usr/syno/bin/synoindex` existence before attempting operations
+
+---
+
+## [1.0.1-00020] through [1.0.1-00025] - 2025-12-XX
+
+### Changed
+- Minor improvements and bug fixes
+- Documentation updates
+- Code cleanup and optimization
+
+---
 
 ## [1.0.1-00019] - 2025-12-05
 
@@ -140,7 +181,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+
 ## Previous Versions
 
 For changes in previous versions, please refer to the git history or project documentation.
-

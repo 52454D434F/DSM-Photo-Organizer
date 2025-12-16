@@ -9,6 +9,7 @@ import subprocess
 import signal
 import atexit
 import json
+import re
 from datetime import datetime
 from PIL import Image
 from PIL.ExifTags import TAGS
@@ -235,6 +236,21 @@ def save_statistics(force=False):
     except Exception as e:
         log_system_event("Error", f"Error saving statistics: {e}")
 
+def update_files_in_queue():
+    """Update the count of files in the source directory (queue)."""
+    global stats
+    try:
+        if os.path.exists(SOURCE_DIR):
+            files = [f for f in os.listdir(SOURCE_DIR) 
+                    if os.path.isfile(os.path.join(SOURCE_DIR, f)) 
+                    and not f.endswith('.Zone.Identifier')]
+            stats["files_in_queue"] = len(files)
+        else:
+            stats["files_in_queue"] = 0
+    except Exception:
+        # If we can't count files, don't update the count
+        pass
+
 def save_statistics_if_needed(force=False):
     """Save statistics periodically (every 10 operations or 30 seconds timeout) or when forced."""
     global _stats_save_counter, _stats_last_save_time
@@ -249,6 +265,8 @@ def save_statistics_if_needed(force=False):
     # Save every 10 operations, after 30 seconds timeout, or when forced
     time_since_last_save = current_time - _stats_last_save_time
     if force or _stats_save_counter >= 10 or time_since_last_save >= 30:
+        # Update files in queue before saving
+        update_files_in_queue()
         save_statistics()
         _stats_save_counter = 0
         _stats_last_save_time = current_time
@@ -274,6 +292,7 @@ stats = {
     "bytes_moved_to_duplicates": 0,
     "files_deleted": 0,
     "bytes_deleted": 0,
+    "files_in_queue": 0,
     "last_updated": None
 }
 
@@ -1017,12 +1036,90 @@ def get_unique_duplicate_filename(duplicates_folder, base_filename, media_dateti
                     return test_filename
                 counter += 1
 
+def is_temporary_file(file_path):
+    """Check if a file is a temporary file created during transfer.
+    
+    Temporary files typically have the pattern: .<filename>.<random6chars>
+    where random6chars is a 6-character alphanumeric string.
+    This pattern is used by Synology/SMB file transfers.
+    
+    Args:
+        file_path: Path to the file to check
+        
+    Returns:
+        True if the file appears to be a temporary file, False otherwise
+    """
+    filename = os.path.basename(file_path)
+    
+    # Check if filename starts with a dot (hidden/temporary file)
+    if not filename.startswith('.'):
+        return False
+    
+    # Pattern: .<something>.<6alphanumeric>
+    # Example: .20210819_145057.JPG.CKI2Uo
+    pattern = r'^\.(.+?)\.([A-Za-z0-9]{6})$'
+    match = re.match(pattern, filename)
+    
+    return match is not None
+
+def wait_for_file_stable(file_path, max_wait_time=30, check_interval=0.5):
+    """Wait for a file to be fully written and stable.
+    
+    Checks if the file size remains constant for a period of time,
+    indicating the file transfer is complete.
+    
+    Args:
+        file_path: Path to the file to check
+        max_wait_time: Maximum time to wait in seconds (default: 30)
+        check_interval: Time between checks in seconds (default: 0.5)
+        
+    Returns:
+        True if file is stable, False if timeout or file doesn't exist
+    """
+    if not os.path.exists(file_path):
+        return False
+    
+    start_time = time.time()
+    last_size = None
+    stable_count = 0
+    required_stable_checks = 3  # File must be stable for 3 consecutive checks
+    
+    while time.time() - start_time < max_wait_time:
+        try:
+            if not os.path.exists(file_path):
+                return False
+            
+            current_size = os.path.getsize(file_path)
+            
+            if current_size == last_size:
+                stable_count += 1
+                if stable_count >= required_stable_checks:
+                    # File size has been stable for required checks
+                    return True
+            else:
+                # File size changed, reset stability counter
+                stable_count = 0
+                last_size = current_size
+            
+            time.sleep(check_interval)
+        except (OSError, IOError):
+            # File might be locked or being written, wait and retry
+            time.sleep(check_interval)
+            continue
+    
+    # Timeout reached
+    return False
+
 def process_photo(file_path):
     """Process a single photo or video file and move it to the appropriate date folder."""
     global bytes_moved, bytes_deleted, last_file_detected_time, statistics_reset_time
     
     # Skip Windows Zone.Identifier files
     if file_path.endswith('.Zone.Identifier'):
+        return
+    
+    # Skip temporary files (files with pattern .<filename>.<random6chars>)
+    if is_temporary_file(file_path):
         return
     
     # Verify file exists before processing
@@ -1055,10 +1152,14 @@ def process_photo(file_path):
     if statistics_reset_time is not None:
         statistics_reset_time = None
     
-    # Wait a moment to ensure file is fully written (useful for large files being copied)
-    time.sleep(0.5)
+    # Wait for file to be stable (fully written) before processing
+    # This is especially important for large files being copied over network
+    if not wait_for_file_stable(file_path, max_wait_time=30, check_interval=0.5):
+        # File didn't stabilize within timeout, skip processing
+        # It will be picked up by the periodic check if it becomes stable later
+        return
     
-    # Final check after sleep - file might have been moved during sleep
+    # Final check after wait - file might have been moved during wait
     if not os.path.isfile(file_path):
         return
     
@@ -1430,6 +1531,8 @@ def process_photo(file_path):
         stats["files_moved_to_destination"] += 1
         stats["bytes_moved_to_destination"] += file_size
         bytes_moved += file_size  # Legacy compatibility
+        # Update files in queue count after file is moved
+        update_files_in_queue()
         save_statistics_if_needed()
         
         # Format destination path for log
@@ -1464,6 +1567,7 @@ def move_photos_by_date():
     if not os.path.exists(SOURCE_DIR):
         print(f"Source directory {SOURCE_DIR} does not exist. Creating it...")
         ensure_dir(SOURCE_DIR)
+        stats["files_in_queue"] = 0
         return
     
     files_found = []
@@ -1472,8 +1576,14 @@ def move_photos_by_date():
         if filename.endswith('.Zone.Identifier'):
             continue
         file_path = os.path.join(SOURCE_DIR, filename)
+        # Skip temporary files (will be processed when renamed to final name)
+        if is_temporary_file(file_path):
+            continue
         if os.path.isfile(file_path):
             files_found.append(file_path)
+    
+    # Update files in queue count
+    stats["files_in_queue"] = len(files_found)
     
     for file_path in files_found:
         try:
@@ -1490,6 +1600,10 @@ class PhotoHandler(FileSystemEventHandler):
             # Skip Windows Zone.Identifier files
             if event.src_path.endswith('.Zone.Identifier'):
                 return
+            
+            # Skip temporary files (will be processed when renamed to final name)
+            if is_temporary_file(event.src_path):
+                return
 
             try:
                 file_size = os.path.getsize(event.src_path)
@@ -1501,6 +1615,14 @@ class PhotoHandler(FileSystemEventHandler):
     def on_moved(self, event):
         """Called when a file or directory is moved/renamed."""
         if not event.is_directory:
+            # Skip Windows Zone.Identifier files
+            if event.dest_path.endswith('.Zone.Identifier'):
+                return
+            
+            # Skip temporary files (they will be renamed again to final name)
+            if is_temporary_file(event.dest_path):
+                return
+            
             # Only process moves if the destination is in the source directory
             # This prevents processing files that were moved OUT of the source directory
             try:
@@ -1553,7 +1675,10 @@ def start_watching():
                     if os.path.exists(SOURCE_DIR):
                         files = [f for f in os.listdir(SOURCE_DIR) 
                                 if os.path.isfile(os.path.join(SOURCE_DIR, f)) 
-                                and not f.endswith('.Zone.Identifier')]
+                                and not f.endswith('.Zone.Identifier')
+                                and not is_temporary_file(os.path.join(SOURCE_DIR, f))]
+                        # Update files in queue count
+                        update_files_in_queue()
                         if files:
                             for filename in files:
                                 file_path = os.path.join(SOURCE_DIR, filename)
@@ -1667,6 +1792,9 @@ if __name__ == "__main__":
     print()
     
     log_system_event("Info", "Photo Organizer service started successfully and watching for new files")
+    
+    # Initialize files in queue count
+    update_files_in_queue()
     
     # Process any existing photos first
     print("Processing existing photos...")

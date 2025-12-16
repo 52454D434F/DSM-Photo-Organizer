@@ -122,12 +122,27 @@ case $1 in
 			LOG_DIR="/tmp"
 		fi
 		
+		# Get json-server version for logging
+		JSON_SERVER_VER="N/A"
+		if [ -f "$NODE_MODULES_DIR/.bin/json-server" ]; then
+			JSON_SERVER_VER=$("$NODE_CMD" "$NODE_MODULES_DIR/.bin/json-server" --version 2>/dev/null || echo "N/A")
+		fi
+		
+		# Get port from config.ini for access URL
+		SERVER_PORT="3000"
+		if [ -f "$CONFIG_FILE" ]; then
+			CONFIG_PORT=$(grep -E "^port=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' || echo "")
+			if [ -n "$CONFIG_PORT" ] && [ "$CONFIG_PORT" != "" ]; then
+				SERVER_PORT="$CONFIG_PORT"
+			fi
+		fi
+		
 		# Start the process with environment variables
 		# PACKAGE_VAR_DIR is used by json-server-start.js to locate config.ini
 		# The config.ini contains the wizard-configured values (port, db_file)
 		export PACKAGE_VAR_DIR="$PACKAGE_VAR_DIR"
 		export CONFIG_FILE="$CONFIG_FILE"
-		_log_message "Starting JSON Server with config from: $CONFIG_FILE"
+		_log_message "Starting JSON Server version $JSON_SERVER_VER"
 		"$NODE_CMD" "$SCRIPT_PATH" >> "$LOG_FILE" 2>&1 &
 		START_PID=$!
 		
@@ -160,6 +175,21 @@ case $1 in
 				echo $PID > "$PID_FILE" 2>/dev/null || true
 			fi
 			_log_message "Service started successfully (PID: $PID)"
+			# Get NAS IP for the access message (try to get first non-loopback IP)
+			NAS_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}' || echo "YOUR_NAS_IP")
+			# Get available resources (top-level keys) from db.json to show example endpoints
+			DB_FILE=$(grep -E "^db_file=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' || echo "")
+			if [ -n "$DB_FILE" ] && [ -f "$DB_FILE" ]; then
+				# Extract first top-level key as example resource
+				EXAMPLE_RESOURCE=$(grep -oE '"[^"]+":\s*[\[{]' "$DB_FILE" 2>/dev/null | head -n 1 | sed 's/":.*//; s/"//g' || echo "")
+				if [ -n "$EXAMPLE_RESOURCE" ]; then
+					_log_message "Access json-server via http://localhost:$SERVER_PORT/$EXAMPLE_RESOURCE or http://$NAS_IP:$SERVER_PORT/$EXAMPLE_RESOURCE"
+				else
+					_log_message "Access json-server via http://localhost:$SERVER_PORT/ or http://$NAS_IP:$SERVER_PORT/"
+				fi
+			else
+				_log_message "Access json-server via http://localhost:$SERVER_PORT/ or http://$NAS_IP:$SERVER_PORT/"
+			fi
 			exit 0
 		else
 			_log_message "ERROR: Failed to start service"

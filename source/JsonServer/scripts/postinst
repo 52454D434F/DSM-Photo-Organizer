@@ -110,39 +110,44 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 # Check if wizard values are provided
-# Note: WIZARD_UIFILES may use either pkgwizard_* or wizard_* prefix
+# Note: WIZARD_UIFILES uses the key names directly as environment variables (e.g., "UI_PORT" not "pkgwizard_UI_PORT")
+# Also check for legacy formats: pkgwizard_* and wizard_* prefixes
 # Wizard values always take priority when provided
-# Debug: Log all environment variables that start with pkgwizard or wizard to see what's available
+# Debug: Log all environment variables that might be wizard values
 _log_message "Checking for wizard variables..."
-env | grep -E "^pkgwizard_|^wizard_" 2>/dev/null | while IFS='=' read -r key value; do
+env | grep -E "^(UI_PORT|DB_PATH|DB_FILENAME|pkgwizard_|wizard_)" 2>/dev/null | while IFS='=' read -r key value; do
     _log_message "  Found: $key=$value"
 done || _log_message "  No wizard variables found in environment"
 
 WIZARD_VALUES_PROVIDED=false
-# Check both pkgwizard_* (WIZARD_UIFILES format) and wizard_* (legacy/alternative format)
-if [ -n "$pkgwizard_UI_PORT" ] || [ -n "$wizard_UI_PORT" ] || \
+# Check for WIZARD_UIFILES format (direct key names) first, then legacy formats
+if [ -n "$UI_PORT" ] || [ -n "$DB_PATH" ] || [ -n "$DB_FILENAME" ] || \
+   [ -n "$pkgwizard_UI_PORT" ] || [ -n "$wizard_UI_PORT" ] || \
    [ -n "$pkgwizard_DB_PATH" ] || [ -n "$wizard_DB_PATH" ] || \
-   [ -n "$pkgwizard_DB_FILENAME" ] || [ -n "$wizard_DB_FILENAME" ] || \
-   [ -n "$pkgwizard_DB_CONTENT" ] || [ -n "$wizard_DB_CONTENT" ]; then
+   [ -n "$pkgwizard_DB_FILENAME" ] || [ -n "$wizard_DB_FILENAME" ]; then
     WIZARD_VALUES_PROVIDED=true
     _log_message "Wizard values detected - they will take priority over existing configuration"
     # Debug: log which wizard values were provided
+    [ -n "$UI_PORT" ] && _log_message "  Wizard UI_PORT (direct): $UI_PORT"
     [ -n "$pkgwizard_UI_PORT" ] && _log_message "  Wizard UI_PORT (pkgwizard): $pkgwizard_UI_PORT"
     [ -n "$wizard_UI_PORT" ] && _log_message "  Wizard UI_PORT (wizard): $wizard_UI_PORT"
+    [ -n "$DB_PATH" ] && _log_message "  Wizard DB_PATH (direct): $DB_PATH"
     [ -n "$pkgwizard_DB_PATH" ] && _log_message "  Wizard DB_PATH (pkgwizard): $pkgwizard_DB_PATH"
     [ -n "$wizard_DB_PATH" ] && _log_message "  Wizard DB_PATH (wizard): $wizard_DB_PATH"
+    [ -n "$DB_FILENAME" ] && _log_message "  Wizard DB_FILENAME (direct): $DB_FILENAME"
     [ -n "$pkgwizard_DB_FILENAME" ] && _log_message "  Wizard DB_FILENAME (pkgwizard): $pkgwizard_DB_FILENAME"
     [ -n "$wizard_DB_FILENAME" ] && _log_message "  Wizard DB_FILENAME (wizard): $wizard_DB_FILENAME"
-    [ -n "$pkgwizard_DB_CONTENT" ] && _log_message "  Wizard DB_CONTENT (pkgwizard): (provided)"
-    [ -n "$wizard_DB_CONTENT" ] && _log_message "  Wizard DB_CONTENT (wizard): (provided)"
 else
-    _log_message "No wizard values detected in either pkgwizard_* or wizard_* variables"
+    _log_message "No wizard values detected"
 fi
 
 # Apply wizard settings: port number
 # Wizard value always takes priority if provided
-# Try both pkgwizard_* and wizard_* formats (WIZARD_UIFILES may use either)
-if [ -n "$pkgwizard_UI_PORT" ]; then
+# Try WIZARD_UIFILES format (direct key) first, then legacy formats
+if [ -n "$UI_PORT" ]; then
+    PORT="$UI_PORT"
+    _log_message "Using wizard port value (UI_PORT): $PORT"
+elif [ -n "$pkgwizard_UI_PORT" ]; then
     PORT="$pkgwizard_UI_PORT"
     _log_message "Using wizard port value (pkgwizard_UI_PORT): $PORT"
 elif [ -n "$wizard_UI_PORT" ]; then
@@ -158,8 +163,11 @@ if [ -z "$PORT" ] || [ "$PORT" = "" ]; then
 fi
 
 # Apply wizard settings: database file path
-# Try both pkgwizard_* and wizard_* formats
-if [ -n "$pkgwizard_DB_PATH" ]; then
+# Try WIZARD_UIFILES format (direct key) first, then legacy formats
+if [ -n "$DB_PATH" ]; then
+    DB_PATH="$DB_PATH"
+    _log_message "Using wizard DB_PATH (DB_PATH): $DB_PATH"
+elif [ -n "$pkgwizard_DB_PATH" ]; then
     DB_PATH="$pkgwizard_DB_PATH"
     _log_message "Using wizard DB_PATH (pkgwizard_DB_PATH): $DB_PATH"
 elif [ -n "$wizard_DB_PATH" ]; then
@@ -177,8 +185,11 @@ fi
 DB_PATH=$(echo "$DB_PATH" | sed 's:/*$::')
 
 # Apply wizard settings: database file name
-# Try both pkgwizard_* and wizard_* formats
-if [ -n "$pkgwizard_DB_FILENAME" ]; then
+# Try WIZARD_UIFILES format (direct key) first, then legacy formats
+if [ -n "$DB_FILENAME" ]; then
+    DB_FILENAME="$DB_FILENAME"
+    _log_message "Using wizard DB_FILENAME (DB_FILENAME): $DB_FILENAME"
+elif [ -n "$pkgwizard_DB_FILENAME" ]; then
     DB_FILENAME="$pkgwizard_DB_FILENAME"
     _log_message "Using wizard DB_FILENAME (pkgwizard_DB_FILENAME): $DB_FILENAME"
 elif [ -n "$wizard_DB_FILENAME" ]; then
@@ -245,38 +256,41 @@ fi
 # Create db.json if it doesn't exist at the configured location
 if [ ! -f "$DB_FILE" ]; then
     DB_DIR=$(dirname "$DB_FILE")
-    mkdir -p "$DB_DIR" 2>/dev/null || true
     
-    # Check if wizard provided custom database content
-    if [ -n "$pkgwizard_DB_CONTENT" ] && [ "$pkgwizard_DB_CONTENT" != "" ]; then
-        # Write wizard-provided content to db.json
-        # Validate it's valid JSON before writing
-        TEMP_JSON="/tmp/json_server_wizard_content.json"
-        echo "$pkgwizard_DB_CONTENT" > "$TEMP_JSON" 2>/dev/null
-        if "$NODE_CMD" -e "JSON.parse(require('fs').readFileSync('$TEMP_JSON', 'utf-8'))" 2>/dev/null; then
-            mv "$TEMP_JSON" "$DB_FILE" 2>/dev/null || {
-                cp "$TEMP_JSON" "$DB_FILE" 2>/dev/null
-                rm -f "$TEMP_JSON" 2>/dev/null
+    # Try to create directory if it doesn't exist
+    if [ ! -d "$DB_DIR" ]; then
+        mkdir -p "$DB_DIR" 2>/dev/null || {
+            _log_message "WARNING: Cannot create directory $DB_DIR - package user may not have permissions"
+            _log_message "The database file will be created by json-server-start.js when the service starts"
+            _log_message "If the service fails to start, ensure the JsonServer user has write access to: $DB_DIR"
+        }
+    fi
+    
+    # Check if we can write to the directory (if it exists)
+    if [ -d "$DB_DIR" ] && [ -w "$DB_DIR" ]; then
+        # Use default db.json from package
+        if [ -f "$APP_DIR/db.json" ]; then
+            cp "$APP_DIR/db.json" "$DB_FILE" 2>/dev/null || {
+                _log_message "WARNING: Cannot copy default db.json to $DB_FILE - permission denied"
+                _log_message "The file will be created by json-server-start.js when the service starts"
             }
-            _log_message "Database file created with wizard-provided content at $DB_FILE"
-        else
-            rm -f "$TEMP_JSON" 2>/dev/null
-            echo "ERROR: Invalid JSON provided in wizard DB_CONTENT field" >> $SYNOPKG_TEMP_LOGFILE
-            _log_message "ERROR: Invalid JSON in wizard DB_CONTENT, using default db.json"
-            # Fall through to use default
-            if [ -f "$APP_DIR/db.json" ]; then
-                cp "$APP_DIR/db.json" "$DB_FILE"
+            if [ -f "$DB_FILE" ]; then
                 _log_message "Default db.json copied to $DB_FILE"
             fi
+        else
+            # Fallback: create minimal default db.json
+            echo '{"posts":[],"comments":[],"profile":{}}' > "$DB_FILE" 2>/dev/null || {
+                _log_message "WARNING: Cannot create default db.json at $DB_FILE - permission denied"
+                _log_message "The file will be created by json-server-start.js when the service starts"
+            }
+            if [ -f "$DB_FILE" ]; then
+                _log_message "Minimal default db.json created at $DB_FILE"
+            fi
         fi
-    elif [ -f "$APP_DIR/db.json" ]; then
-        # Use default db.json from package
-        cp "$APP_DIR/db.json" "$DB_FILE"
-        _log_message "Default db.json copied to $DB_FILE"
     else
-        # Fallback: create minimal default db.json
-        echo '{"posts":[],"comments":[],"profile":{}}' > "$DB_FILE"
-        _log_message "Minimal default db.json created at $DB_FILE"
+        _log_message "WARNING: Directory $DB_DIR is not writable by package user"
+        _log_message "The database file will be created by json-server-start.js when the service starts"
+        _log_message "If the service fails to start, ensure the JsonServer user has write access to: $DB_DIR"
     fi
 fi
 
@@ -306,7 +320,7 @@ if [ ! -f "$PACKAGE_VAR_DIR/package.json" ]; then
 fi
 
 # Install json-server
-_log_message "Installing json-server..."
+_log_message "json-server installation started"
 
 # Create npm cache directory that package user can write to
 NPM_CACHE_DIR="$PACKAGE_VAR_DIR/.npm-cache"
@@ -341,15 +355,15 @@ JSON_SERVER_VER=$("$NODE_CMD" "$NODE_MODULES_DIR/.bin/json-server" --version 2>/
 
 # Log detailed information to system log (visible in Log Center)
 # One item per line for better readability
-_log_message "Package version: $PACKAGE_VERSION"
+_log_message "DSM Package version: $PACKAGE_VERSION"
 _log_message "Installation path: $APP_DIR"
 _log_message "Node modules directory: $NODE_MODULES_DIR"
 _log_message "Node.js version: $NODE_VER"
 _log_message "npm version: $NPM_VER"
-_log_message "json-server version: $JSON_SERVER_VER"
+_log_message "Node json-server version: $JSON_SERVER_VER"
 _log_message "Configuration file: $CONFIG_FILE"
 _log_message "Database file: $DB_FILE"
 _log_message "Server port: $PORT"
-_log_message "Installation completed successfully"
+_log_message "json-server installation completed successfully"
 
 exit 0
