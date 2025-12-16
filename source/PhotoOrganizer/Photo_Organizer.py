@@ -241,9 +241,17 @@ def update_files_in_queue():
     global stats
     try:
         if os.path.exists(SOURCE_DIR):
-            files = [f for f in os.listdir(SOURCE_DIR) 
-                    if os.path.isfile(os.path.join(SOURCE_DIR, f)) 
-                    and not f.endswith('.Zone.Identifier')]
+            files = []
+            for filename in os.listdir(SOURCE_DIR):
+                # Skip Windows Zone.Identifier files
+                if filename.endswith('.Zone.Identifier'):
+                    continue
+                file_path = os.path.join(SOURCE_DIR, filename)
+                # Skip temporary files (will be processed when renamed to final name)
+                if is_temporary_file(file_path):
+                    continue
+                if os.path.isfile(file_path):
+                    files.append(file_path)
             stats["files_in_queue"] = len(files)
         else:
             stats["files_in_queue"] = 0
@@ -1619,9 +1627,16 @@ class PhotoHandler(FileSystemEventHandler):
             if event.dest_path.endswith('.Zone.Identifier'):
                 return
             
-            # Skip temporary files (they will be renamed again to final name)
-            if is_temporary_file(event.dest_path):
+            # Check if this is a temporary file being renamed to final name
+            src_is_temp = is_temporary_file(event.src_path)
+            dest_is_temp = is_temporary_file(event.dest_path)
+            
+            # If destination is still a temporary file, skip it (wait for final rename)
+            if dest_is_temp:
                 return
+            
+            # If source was temporary and destination is not, this is the final rename - process it
+            # Also process normal renames (neither source nor dest are temporary)
             
             # Only process moves if the destination is in the source directory
             # This prevents processing files that were moved OUT of the source directory
@@ -1633,9 +1648,15 @@ class PhotoHandler(FileSystemEventHandler):
                 if abs_dest_path.startswith(abs_source_dir + os.sep) or abs_dest_path == abs_source_dir:
                     try:
                         file_size = os.path.getsize(event.dest_path)
-                        log_file_event("File Moved/Renamed", event.src_path, event.dest_path, file_size, "External move detected")
+                        if src_is_temp:
+                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, file_size, "Temporary file renamed to final name")
+                        else:
+                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, file_size, "External move detected")
                     except Exception:
-                        log_file_event("File Moved/Renamed", event.src_path, event.dest_path, None, "External move detected")
+                        if src_is_temp:
+                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, None, "Temporary file renamed to final name")
+                        else:
+                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, None, "External move detected")
                     process_photo(event.dest_path)
             except Exception:
                 # If path check fails, skip to avoid errors
