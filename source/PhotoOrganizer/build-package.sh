@@ -56,5 +56,6 @@ fi
 
 # Run package creation
 echo "Running package creation..."
-python3 "$PKGCREATE_SCRIPT" -v 7.2 -c PhotoOrganizer
+#python3 "$PKGCREATE_SCRIPT" -v 7.2 -c PhotoOrganizer
+python3 "$PKGCREATE_SCRIPT" -v 7.2 -p geminilake -c PhotoOrganizer
 

@@ -181,6 +181,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.1-00029] - 2025-12-16
+
+### Added
+- **Temporary File Detection**
+  - Added `is_temporary_file()` function to detect temporary files created during Synology/SMB file transfers
+  - Temporary files follow pattern: `.<filename>.<random6chars>` (e.g., `.20210819_145057.JPG.CKI2Uo`)
+  - Prevents processing of incomplete files during transfer operations
+  - Automatically skips temporary files in file monitoring and processing queues
+
+- **File Stability Checking**
+  - Added `wait_for_file_stable()` function to ensure files are fully written before processing
+  - Checks if file size remains constant for consecutive checks before proceeding
+  - Optimized wait time and check intervals for faster processing
+  - Prevents processing of files that are still being transferred
+
+### Changed
+- **File Processing Reliability**
+  - Enhanced file detection to skip temporary transfer files
+  - Improved file stability verification before processing
+  - Better handling of files during active transfers (SMB/Synology file operations)
+  - File monitoring now filters out temporary files from processing queues
+
+### Technical Details
+- Uses regex pattern matching (`re` module) to identify temporary file patterns
+- `is_temporary_file()` checks for pattern: `^\.(.+?)\.([A-Za-z0-9]{6})$`
+- `wait_for_file_stable()` monitors file size stability with configurable timeout (default: 5 seconds)
+- Applied to all file detection points: file system watcher, periodic checks, and initial processing
+
+---
+
+## [1.0.1-00028] - 2025-12-XX
+
+### Changed
+- Minor improvements and optimizations
+- Code cleanup and refactoring
+
+---
+
+## [1.0.1-00027] - 2025-12-XX
+
+### Changed
+- Minor improvements and bug fixes
+- Enhanced error handling
+
+---
+
+## [1.0.1-00026] - 2025-12-XX
+
+### Changed
+- **Logging and Error Handling Refactoring**
+  - Refactored logging in `update_synology_indexer` and related functions
+  - Improved error handling for Synology indexer operations with proper timeout management (5-second timeout)
+  - Enhanced silent failure handling for non-critical operations (indexer updates don't affect file operations)
+  - Better separation of concerns between file operations and indexer updates
+
+### Fixed
+- **Indexer Operation Reliability**
+  - Improved `synoindex` command execution with proper timeout and error suppression
+  - Indexer operations now use `subprocess.run` with `check=False` and `stdout/stderr=DEVNULL` for silent operation
+  - Enhanced exception handling to prevent indexer failures from affecting file move operations
+
+### Technical Details
+- `update_synology_indexer` function improvements:
+  - Uses `subprocess.run` with 5-second timeout
+  - Proper error suppression with `stdout=DEVNULL` and `stderr=DEVNULL`
+  - Wrapped in try-except blocks to ensure file operations continue even if indexer fails
+  - Checks for `/usr/syno/bin/synoindex` existence before attempting operations
+
+---
+
+## [1.0.1-00020] through [1.0.1-00025] - 2025-12-XX
+
+### Changed
+- Minor improvements and bug fixes
+- Documentation updates
+- Code cleanup and optimization
+
+---
 
 ## Previous Versions
 

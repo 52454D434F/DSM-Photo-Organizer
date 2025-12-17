@@ -52,7 +52,7 @@ Photo Organizer and Deduplicator is a Synology NAS package that automatically or
 
 ### Package Information
 - **Package Name**: PhotoOrganizer
-- **Version**: 1.0.1-00026
+- **Version**: 1.0.1-00029
 - **Display Name**: Photo Organizer and Deduplicator
 - **Architecture**: noarch (works on all Synology NAS models)
 - **Minimum DSM Version**: 7.0-40000
@@ -92,9 +92,14 @@ The project source code, build scripts, and documentation are available on GitHu
 ## Download
 
 ### Latest Version:
-[Download PhotoOrganizer-1.0.1-00026.spk](https://github.com/52454D434F/DSM-Photo-Organizer/blob/main/result_spk/PhotoOrganizer-1.0.1-00026/PhotoOrganizer-1.0.1-00026.spk)
+[Download PhotoOrganizer-1.0.1-00029.spk](https://github.com/52454D434F/DSM-Photo-Organizer/blob/main/result_spk/PhotoOrganizer-1.0.1-00029/PhotoOrganizer-1.0.1-00029.spk)
 
 **Recent Updates:**
+
+- **v1.0.1-00029** (2025-12-XX)
+  - **Temporary File Detection**: Added automatic detection and skipping of temporary files created during Synology/SMB transfers (pattern: `.<filename>.<random6chars>`)
+  - **File Stability Checking**: Enhanced file processing to wait for files to be fully written before processing, preventing errors during active transfers
+  - **Improved Transfer Handling**: Better reliability when processing files during active SMB/Synology file transfers
 
 - **v1.0.1-00026** (2025-12-XX)
   - **Improved Indexer Reliability**: Enhanced error handling for Synology indexer operations with proper timeout management (5-second timeout)
