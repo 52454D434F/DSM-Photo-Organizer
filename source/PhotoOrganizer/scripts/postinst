@@ -83,12 +83,15 @@ chmod 755 "$APP_DIR" 2>/dev/null || true
 # ----------------------------------------------------------------------
 # Apply wizard settings: source/destination folders and duplicate policy
 # ----------------------------------------------------------------------
+# Supports both WIZARD_UIFILES format (UI_* variables) and legacy format (wizard_UI_*)
+# WIZARD_UIFILES format (DSM 7+) takes priority, falls back to legacy format if not provided
 
 # Photo share root (volume-based path)
 PHOTO_ROOT="/volume1/photo"
 
-# Folder to monitor (relative to PHOTO_ROOT), default "Photo Organizer"
-SRC_SUBDIR="${wizard_UI_SRCDIR:-Photo Organizer}"
+# Folder to monitor (relative to PHOTO_ROOT)
+# Check WIZARD_UIFILES format first (UI_SRCDIR), then legacy format (wizard_UI_SRCDIR), then default
+SRC_SUBDIR="${UI_SRCDIR:-${wizard_UI_SRCDIR:-Photo Organizer}}"
 SRC_SUBDIR="$(echo "$SRC_SUBDIR" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
 if [ -n "$SRC_SUBDIR" ]; then
 	SRC_DIR="${PHOTO_ROOT}/${SRC_SUBDIR}"
@@ -96,8 +99,9 @@ else
 	SRC_DIR="${PHOTO_ROOT}"
 fi
 
-# Destination folder (relative to PHOTO_ROOT), default root if empty
-DST_SUBDIR="${wizard_UI_DSTDIR:-}"
+# Destination folder (relative to PHOTO_ROOT)
+# Check WIZARD_UIFILES format first (UI_DSTDIR), then legacy format (wizard_UI_DSTDIR), then default
+DST_SUBDIR="${UI_DSTDIR:-${wizard_UI_DSTDIR:-}}"
 DST_SUBDIR="$(echo "$DST_SUBDIR" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
 if [ -n "$DST_SUBDIR" ]; then
 	DEST_DIR="${PHOTO_ROOT}/${DST_SUBDIR}"
@@ -106,7 +110,8 @@ else
 fi
 
 # Duplicate handling
-DELETE_DUPS_RAW="${wizard_UI_DELETE_DUPS:-UI_DELETE_DUPS}"
+# Check WIZARD_UIFILES format first (UI_DELETE_DUPS), then legacy format (wizard_UI_DELETE_DUPS), then default
+DELETE_DUPS_RAW="${UI_DELETE_DUPS:-${wizard_UI_DELETE_DUPS:-yes}}"
 if [ "$DELETE_DUPS_RAW" = "no" ]; then
 	DELETE_DUPS="false"
 else

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Copyright (C) 2000-2020 Synology Inc. All rights reserved.
+#
+# Photo Organizer Installation Wizard (Legacy Format)
+# This file provides fallback defaults for older DSM versions
+# For DSM 7+, WIZARD_UIFILES/install_uifiles is preferred
+# These values are used by the postinst script to configure the package
+
+# Source directory subfolder (relative to /volume1/photo)
+# Default: "Photo Organizer"
+# This is the folder that will be continuously monitored for new photos
+wizard_UI_SRCDIR="Photo Organizer"
+
+# Destination directory subfolder (relative to /volume1/photo)
+# Default: empty (root of /volume1/photo)
+# Leave empty to use the photo root directory as destination
+# Organized photos will be sorted by date into year/month folders (e.g., 2024/01_Jan/)
+wizard_UI_DSTDIR=""
+
+# Duplicate handling policy
+# Options: "yes" or "no"
+# Default: "yes" (delete exact duplicates)
+# Set to "no" to move duplicates to Duplicates folder instead
+# Exact duplicates (same MD5 hash) will be deleted if 'yes', or moved to Duplicates subfolder if 'no'
+wizard_UI_DELETE_DUPS="yes"
+
