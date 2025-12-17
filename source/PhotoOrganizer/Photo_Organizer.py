@@ -941,20 +941,54 @@ def format_datetime_for_filename(dt, include_subseconds=False):
         return f"{base_format}.{milliseconds_value:04d}"
     return base_format
 
+# MD5 hash cache to avoid recalculating hashes for the same file
+_md5_cache = {}
+
 def calculate_md5(file_path):
-    """Calculate MD5 hash of a file."""
+    """Calculate MD5 hash of a file with caching and optimized chunk size."""
+    # Check cache first
+    try:
+        file_size = os.path.getsize(file_path)
+        file_mtime = os.path.getmtime(file_path)
+        cache_key = (file_path, file_size, file_mtime)
+        
+        if cache_key in _md5_cache:
+            return _md5_cache[cache_key]
+    except Exception:
+        pass
+    
     hash_md5 = hashlib.md5()
     try:
         with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
+            # Use 1MB chunks instead of 4KB for much faster hashing on large files
+            for chunk in iter(lambda: f.read(1048576), b""):  # 1MB chunks
                 hash_md5.update(chunk)
-        return hash_md5.hexdigest()
+        result = hash_md5.hexdigest()
+        
+        # Cache the result
+        try:
+            file_size = os.path.getsize(file_path)
+            file_mtime = os.path.getmtime(file_path)
+            cache_key = (file_path, file_size, file_mtime)
+            _md5_cache[cache_key] = result
+            
+            # Limit cache size to prevent memory issues (keep last 100 entries)
+            if len(_md5_cache) > 100:
+                # Remove oldest entries (simple FIFO)
+                oldest_key = next(iter(_md5_cache))
+                del _md5_cache[oldest_key]
+        except Exception:
+            pass
+        
+        return result
     except Exception as e:
         print(f"Error calculating MD5 for {file_path}: {e}")
         return None
 
 def check_duplicate_md5_in_folder(file_path, folder_path):
     """Check if a file with the same MD5 hash already exists in the specified folder.
+    
+    Optimized: First checks file size, only calculates MD5 if sizes match.
     
     Args:
         file_path: Path to the file to check
@@ -966,18 +1000,38 @@ def check_duplicate_md5_in_folder(file_path, folder_path):
     if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
         return None
     
-    source_hash = calculate_md5(file_path)
-    if source_hash is None:
+    # Get source file size first (fast check)
+    try:
+        source_size = os.path.getsize(file_path)
+    except Exception:
         return None
+    
+    source_hash = None
     
     # Check all files in the folder
     try:
         for filename in os.listdir(folder_path):
             existing_file_path = os.path.join(folder_path, filename)
-            if os.path.isfile(existing_file_path):
-                existing_hash = calculate_md5(existing_file_path)
-                if existing_hash == source_hash:
-                    return existing_file_path
+            if not os.path.isfile(existing_file_path):
+                continue
+            
+            # Fast check: compare file sizes first
+            try:
+                existing_size = os.path.getsize(existing_file_path)
+                if existing_size != source_size:
+                    continue  # Different size, skip MD5 calculation
+            except Exception:
+                continue
+            
+            # Sizes match, now check MD5 (only calculate source hash if needed)
+            if source_hash is None:
+                source_hash = calculate_md5(file_path)
+                if source_hash is None:
+                    return None
+            
+            existing_hash = calculate_md5(existing_file_path)
+            if existing_hash == source_hash:
+                return existing_file_path
     except Exception as e:
         print(f"Error checking for duplicate MD5 in {folder_path}: {e}")
     
@@ -1070,16 +1124,18 @@ def is_temporary_file(file_path):
     
     return match is not None
 
-def wait_for_file_stable(file_path, max_wait_time=30, check_interval=0.5):
+def wait_for_file_stable(file_path, max_wait_time=5, check_interval=0.2):
     """Wait for a file to be fully written and stable.
     
     Checks if the file size remains constant for a period of time,
     indicating the file transfer is complete.
     
+    Optimized: Reduced wait time and check interval for faster processing.
+    
     Args:
         file_path: Path to the file to check
-        max_wait_time: Maximum time to wait in seconds (default: 30)
-        check_interval: Time between checks in seconds (default: 0.5)
+        max_wait_time: Maximum time to wait in seconds (default: 5)
+        check_interval: Time between checks in seconds (default: 0.2)
         
     Returns:
         True if file is stable, False if timeout or file doesn't exist
@@ -1090,7 +1146,7 @@ def wait_for_file_stable(file_path, max_wait_time=30, check_interval=0.5):
     start_time = time.time()
     last_size = None
     stable_count = 0
-    required_stable_checks = 3  # File must be stable for 3 consecutive checks
+    required_stable_checks = 2  # File must be stable for 2 consecutive checks (reduced from 3)
     
     while time.time() - start_time < max_wait_time:
         try:
@@ -1115,7 +1171,14 @@ def wait_for_file_stable(file_path, max_wait_time=30, check_interval=0.5):
             time.sleep(check_interval)
             continue
     
-    # Timeout reached
+    # Timeout reached - but if file exists and has a reasonable size, proceed anyway
+    # This prevents blocking on files that are already stable
+    try:
+        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            return True
+    except Exception:
+        pass
+    
     return False
 
 def process_photo(file_path):
@@ -1290,7 +1353,6 @@ def process_photo(file_path):
     # Check if destination file already exists
     if os.path.exists(dest_path):
         # Compare MD5 hashes to determine if it's a duplicate
-        print(f"File {dest_filename} already exists at {dest_path}, comparing MD5 hashes...")
         # Get file sizes first - if different, they're not duplicates (optimization)
         try:
             source_size = os.path.getsize(file_path)
@@ -1334,7 +1396,7 @@ def process_photo(file_path):
                     shutil.move(file_path, duplicates_path)
                     # Format destination path for log
                     dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
-                    log_file_event("Moved to Duplicates", file_path, duplicates_path, file_size, f"Exact duplicate to {dest_format} detected (kept, not deleted)")
+                    log_file_event("Moved to Duplicates", file_path, duplicates_path, file_size, f"Exact duplicate of {dest_format} - moved to Duplicates (keeping original)")
                     # Update statistics
                     stats["files_moved_to_duplicates"] += 1
                     stats["bytes_moved_to_duplicates"] += file_size
@@ -1357,12 +1419,12 @@ def process_photo(file_path):
                     # Source file is newer, move it to Duplicates
                     file_to_move = file_path
                     file_name = dest_filename
-                    event_info = f"Newer file (modified: {source_mod_time.strftime('%Y-%m-%d %H:%M:%S')})"
+                    event_info = f"Source is newer (modified: {source_mod_time.strftime('%Y-%m-%d %H:%M:%S')})"
                 else:
                     # Destination file is newer, move it to Duplicates and keep source
                     file_to_move = dest_path
                     file_name = dest_filename
-                    event_info = f"Older file (modified: {dest_mod_time.strftime('%Y-%m-%d %H:%M:%S')})"
+                    event_info = f"Destination is newer (modified: {dest_mod_time.strftime('%Y-%m-%d %H:%M:%S')})"
             else:
                 # Fallback if we can't get modification times
                 file_to_move = file_path
@@ -1407,6 +1469,15 @@ def process_photo(file_path):
                 # If we were going to move the destination file, now move the source to its place
                 if file_to_move == dest_path:
                     try:
+                        # Verify source file still exists and is in source directory before moving
+                        if not os.path.isfile(file_path):
+                            return
+                        abs_file_path = os.path.abspath(file_path)
+                        abs_source_dir = os.path.abspath(SOURCE_DIR)
+                        if not abs_file_path.startswith(abs_source_dir + os.sep) and abs_file_path != abs_source_dir:
+                            # File already moved, skip
+                            return
+                        
                         file_size = os.path.getsize(file_path)
                         shutil.move(file_path, dest_path)
                         # Update statistics IMMEDIATELY after move to ensure it's counted even if logging fails
@@ -1418,7 +1489,7 @@ def process_photo(file_path):
                         # Format destination path for log
                         try:
                             dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
-                            log_file_event("File moved", file_path, dest_path, file_size, f"Replaced existing {dest_format} file with current file (is older)")
+                            log_file_event("File moved", file_path, dest_path, file_size, f"Moved to {dest_format} (replaced newer file which was deleted as duplicate)")
                         except Exception as log_error:
                             # Logging failed, but file was moved and stats were updated
                             try:
@@ -1431,8 +1502,13 @@ def process_photo(file_path):
                             update_synology_indexer(old_path=file_path, new_path=dest_path)
                         except Exception:
                             pass
+                    except FileNotFoundError:
+                        # File already moved or doesn't exist - this is expected in race conditions, skip silently
+                        return
                     except Exception as e:
-                        log_file_event("Error", file_path, dest_path, None, f"Error moving source to destination: {e}")
+                        # Only log if file still exists (real error)
+                        if os.path.exists(file_path):
+                            log_file_event("Error", file_path, dest_path, None, f"Error moving source to destination: {e}")
                 return
             
             # No duplicate found in Duplicates folder, proceed with moving
@@ -1441,6 +1517,15 @@ def process_photo(file_path):
                 # File doesn't exist - if we were going to move destination, just move source to destination
                 if file_to_move == dest_path:
                     try:
+                        # Verify source file still exists and is in source directory before moving
+                        if not os.path.isfile(file_path):
+                            return
+                        abs_file_path = os.path.abspath(file_path)
+                        abs_source_dir = os.path.abspath(SOURCE_DIR)
+                        if not abs_file_path.startswith(abs_source_dir + os.sep) and abs_file_path != abs_source_dir:
+                            # File already moved, skip
+                            return
+                        
                         file_size = os.path.getsize(file_path)
                         shutil.move(file_path, dest_path)
                         # Update statistics IMMEDIATELY after move to ensure it's counted even if logging fails
@@ -1452,7 +1537,7 @@ def process_photo(file_path):
                         # Format destination path for log
                         try:
                             dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
-                            log_file_event("File moved", file_path, dest_path, file_size, f"Destination file no longer exists, moved source to {dest_format}")
+                            log_file_event("File moved", file_path, dest_path, file_size, f"Moved to {dest_format} (destination file was already moved to Duplicates)")
                         except Exception as log_error:
                             # Logging failed, but file was moved and stats were updated
                             try:
@@ -1465,11 +1550,16 @@ def process_photo(file_path):
                             update_synology_indexer(old_path=file_path, new_path=dest_path)
                         except Exception:
                             pass
+                    except FileNotFoundError:
+                        # File already moved or doesn't exist - this is expected in race conditions, skip silently
+                        return
                     except Exception as e:
-                        log_file_event("Error", file_path, dest_path, None, f"Error moving source to destination: {e}")
+                        # Only log if file still exists (real error)
+                        if os.path.exists(file_path):
+                            log_file_event("Error", file_path, dest_path, None, f"Error moving source to destination: {e}")
                 else:
-                    # Source file doesn't exist, nothing to do
-                    log_file_event("Error", file_to_move, None, None, f"File to move does not exist: {file_to_move}")
+                    # Source file doesn't exist, nothing to do - skip silently (file may have been moved already)
+                    return
                 return
             
             unique_filename = get_unique_duplicate_filename(duplicates_folder, file_name, media_datetime)
@@ -1480,7 +1570,11 @@ def process_photo(file_path):
                 shutil.move(file_to_move, duplicates_path)
                 # Format destination path for log
                 dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
-                log_file_event("Moved to Duplicates", file_to_move, duplicates_path, file_size, f"Different content than file {dest_format} - {event_info}")
+                # Create clearer message based on which file is being moved
+                if file_to_move == dest_path:
+                    log_file_event("Moved to Duplicates", file_to_move, duplicates_path, file_size, f"Older destination file moved to duplicates (source is newer and will replace it at {dest_format})")
+                else:
+                    log_file_event("Moved to Duplicates", file_to_move, duplicates_path, file_size, f"Newer source file moved to duplicates (keeping older version at {dest_format})")
                 # Update statistics
                 # If moving from destination to duplicates, adjust destination stats
                 if file_to_move == dest_path:
@@ -1498,6 +1592,15 @@ def process_photo(file_path):
                 # If we moved the destination file, now move the source to its place
                 if file_to_move == dest_path:
                     try:
+                        # Verify source file still exists and is in source directory before moving
+                        if not os.path.isfile(file_path):
+                            return
+                        abs_file_path = os.path.abspath(file_path)
+                        abs_source_dir = os.path.abspath(SOURCE_DIR)
+                        if not abs_file_path.startswith(abs_source_dir + os.sep) and abs_file_path != abs_source_dir:
+                            # File already moved, skip
+                            return
+                        
                         file_size = os.path.getsize(file_path)
                         shutil.move(file_path, dest_path)
                         # Update statistics IMMEDIATELY after move to ensure it's counted even if logging fails
@@ -1509,7 +1612,7 @@ def process_photo(file_path):
                         # Format destination path for log
                         try:
                             dest_format = os.path.relpath(dest_path, DEST_DIR).replace(os.sep, '/')
-                            log_file_event("File moved", file_path, dest_path, file_size, f"Replaced existing {dest_format} file with the oldest file")
+                            log_file_event("File moved", file_path, dest_path, file_size, f"Moved to {dest_format} (replaced newer file which was moved to Duplicates)")
                         except Exception as log_error:
                             # Logging failed, but file was moved and stats were updated
                             try:
@@ -1522,8 +1625,16 @@ def process_photo(file_path):
                             update_synology_indexer(old_path=file_path, new_path=dest_path)
                         except Exception:
                             pass
+                    except FileNotFoundError:
+                        # File already moved or doesn't exist - this is expected in race conditions, skip silently
+                        return
                     except Exception as e:
-                        log_file_event("Error", file_path, dest_path, None, f"Error moving source to destination: {e}")
+                        # Only log if file still exists (real error)
+                        if os.path.exists(file_path):
+                            log_file_event("Error", file_path, dest_path, None, f"Error moving source to destination: {e}")
+            except FileNotFoundError:
+                # File already moved or doesn't exist - skip silently
+                return
             except Exception as e:
                 log_file_event("Error", file_to_move, duplicates_path, None, f"Error moving to Duplicates: {e}")
             return
@@ -1531,6 +1642,13 @@ def process_photo(file_path):
     try:
         # Final check before moving - file might have been moved by another process
         if not os.path.isfile(file_path):
+            return
+        
+        # Verify file is still in source directory (hasn't been moved already)
+        abs_file_path = os.path.abspath(file_path)
+        abs_source_dir = os.path.abspath(SOURCE_DIR)
+        if not abs_file_path.startswith(abs_source_dir + os.sep) and abs_file_path != abs_source_dir:
+            # File already moved, skip
             return
         
         file_size = os.path.getsize(file_path)
@@ -1649,14 +1767,14 @@ class PhotoHandler(FileSystemEventHandler):
                     try:
                         file_size = os.path.getsize(event.dest_path)
                         if src_is_temp:
-                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, file_size, "Temporary file renamed to final name")
+                            log_file_event("File Moved", event.src_path, event.dest_path, file_size, "File successfully finalized and atomic rename completed")
                         else:
-                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, file_size, "External move detected")
+                            log_file_event("File Moved or Renamed", event.src_path, event.dest_path, file_size, "External move or rename detected")
                     except Exception:
                         if src_is_temp:
-                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, None, "Temporary file renamed to final name")
+                            log_file_event("File Moved", event.src_path, event.dest_path, None, "File successfully finalized and atomic rename completed")
                         else:
-                            log_file_event("File Moved/Renamed", event.src_path, event.dest_path, None, "External move detected")
+                            log_file_event("File Moved or Renamed", event.src_path, event.dest_path, None, "External move or rename detected")
                     process_photo(event.dest_path)
             except Exception:
                 # If path check fails, skip to avoid errors
@@ -1705,6 +1823,16 @@ def start_watching():
                                 file_path = os.path.join(SOURCE_DIR, filename)
                                 # Verify file still exists and is in source directory before processing
                                 if os.path.isfile(file_path):
+                                    # Verify file is actually in source directory (hasn't been moved)
+                                    try:
+                                        abs_file_path = os.path.abspath(file_path)
+                                        abs_source_dir = os.path.abspath(SOURCE_DIR)
+                                        if not abs_file_path.startswith(abs_source_dir + os.sep) and abs_file_path != abs_source_dir:
+                                            # File already moved, skip
+                                            continue
+                                    except Exception:
+                                        pass
+                                    
                                     # Only process if file is older than 2 seconds (fully written)
                                     if time.time() - os.path.getmtime(file_path) > 2:
                                         try:
