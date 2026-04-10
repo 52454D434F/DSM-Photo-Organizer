@@ -90,11 +90,9 @@ The Photo Organizer addresses common photo management challenges:
 The system uses a hierarchical configuration approach:
 
 1. **Runtime Configuration** (`config.ini`): Primary configuration source
-   - Location priority:
-     - `/var/packages/PhotoOrganizer/config.ini` (Synology primary)
-     - `/var/packages/PhotoOrganizer/var/config.ini` (Synology alternative)
-     - `/volume1/@appstore/PhotoOrganizer/var/config.ini` (Synology fallback)
-     - `./config.ini` (local development)
+   - Location:
+     - `/var/packages/PhotoOrganizer/config.ini` (Synology)
+     - `./config.ini` (local development - next to script)
    - Settings:
      - Source directory path
      - Destination root directory
@@ -149,7 +147,7 @@ File Detected
     │   │   └─→ Create destination folder if needed
     │   │
     │   └─→ If no date found:
-    │       ├─→ Destination: NoDateFound/
+    │       ├─→ Destination: No Date Found/
     │       └─→ Keep original filename
     │
     ├─→ Check if Destination File Exists
@@ -439,7 +437,7 @@ Once installed and running, the service operates automatically:
 
 - Files are processed from the configured source directory
 - Files with dates are renamed and organized by year/month
-- Files without date information are moved to `NoDateFound/` with original filename
+- Files without date information are moved to `No Date Found/` with original filename
 - Unknown file types are moved to `Unknown File Types/` folder
 - **Duplicate handling**:
   - Exact duplicates (same MD5 hash) are deleted or moved to `Duplicates/` based on configuration

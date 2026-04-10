@@ -163,7 +163,7 @@ The Photo Organizer uses a file system watcher to monitor the source directory a
 4. **Destination Path Generation**:
    - If date found: Creates path `YYYY/MM_Mmm/` (e.g., `2024/08_Aug/`)
    - Filename format: `yyyymmdd_hhmmss.ext` (without subseconds for destination folder)
-   - If no date found: Moves to `NoDateFound/` folder with original filename
+   - If no date found: Moves to `No Date Found/` folder with original filename
 
 5. **Duplicate Check**: Before moving, checks if a file with the same name already exists at the destination:
    - **Size Comparison**: First compares file sizes (fast optimization)

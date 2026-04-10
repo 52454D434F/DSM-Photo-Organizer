@@ -3,7 +3,7 @@
 #
 # Photo Organizer Installation Wizard (Legacy Format)
 # This file provides fallback defaults for older DSM versions
-# For DSM 7+, WIZARD_UIFILES/install_uifiles is preferred
+# For DSM 7+, WIZARD_UIFILES/install_uifile is preferred
 # These values are used by the postinst script to configure the package
 
 # Source directory subfolder (relative to /volume1/photo)

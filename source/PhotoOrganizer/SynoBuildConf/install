@@ -112,24 +112,24 @@ create_spk(){
 	cp -av conf $PKG_DIR/conf
 	cp -av LICENSE $PKG_DIR 2>/dev/null || true
 	
-	# Copy WIZARD_UIFILES if it exists (for WIZARD_UIFILES/install_uifiles - DSM 7+ format)
+	# Copy WIZARD_UIFILES if it exists (for WIZARD_UIFILES/install_uifile - DSM 7+ format)
 	if [ -d "WIZARD_UIFILES" ]; then
 		cp -av WIZARD_UIFILES $PKG_DIR/WIZARD_UIFILES
 		echo "WIZARD_UIFILES directory copied" >&2
-		if [ -f "$PKG_DIR/WIZARD_UIFILES/install_uifiles" ]; then
-			echo "install_uifiles verified: $PKG_DIR/WIZARD_UIFILES/install_uifiles" >&2
+		if [ -f "$PKG_DIR/WIZARD_UIFILES/install_uifile" ]; then
+			echo "install_uifile verified: $PKG_DIR/WIZARD_UIFILES/install_uifile" >&2
 		fi
 	fi
 	
-	# Verify wizard file was copied (either conf/wizard or WIZARD_UIFILES/install_uifiles)
-	if [ ! -f "$PKG_DIR/conf/wizard" ] && [ ! -f "$PKG_DIR/WIZARD_UIFILES/install_uifiles" ]; then
-		echo "Warning: Neither conf/wizard nor WIZARD_UIFILES/install_uifiles found (postinst will use defaults)" >&2
+	# Verify wizard file was copied (either conf/wizard or WIZARD_UIFILES/install_uifile)
+	if [ ! -f "$PKG_DIR/conf/wizard" ] && [ ! -f "$PKG_DIR/WIZARD_UIFILES/install_uifile" ]; then
+		echo "Warning: Neither conf/wizard nor WIZARD_UIFILES/install_uifile found (postinst will use defaults)" >&2
 	fi
 	if [ -f "$PKG_DIR/conf/wizard" ]; then
 		echo "Wizard file verified: $PKG_DIR/conf/wizard" >&2
 	fi
-	if [ -f "$PKG_DIR/WIZARD_UIFILES/install_uifiles" ]; then
-		echo "Wizard UI file verified: $PKG_DIR/WIZARD_UIFILES/install_uifiles" >&2
+	if [ -f "$PKG_DIR/WIZARD_UIFILES/install_uifile" ]; then
+		echo "Wizard UI file verified: $PKG_DIR/WIZARD_UIFILES/install_uifile" >&2
 	fi
 	
 	# Copy package icons - prioritize new icon files over old PACKAGE_ICON files

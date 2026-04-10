@@ -1,0 +1,48 @@
+[
+	{
+		"step_title": "Folders Setup",
+		"items": [
+			{
+				"type": "textfield",
+				"desc": "Source path to monitor for new files",
+				"subitems": [{
+					"key": "UI_SRCDIR",
+					"desc": "e.g. /volume1/photo/Photo Organizer",
+					"emptyText": "folder will be created if it doesn't exist",
+					"defaultValue": "/volume1/photo/Photo Organizer"
+				}]
+			},
+			{
+				"type": "textfield",
+				"desc": "Destination path for organized files",
+				"subitems": [{
+					"key": "UI_DSTDIR",
+					"desc": "e.g. /volume1/photo",
+					"emptyText": "root of the shared folder",
+					"defaultValue": "/volume1/photo"
+				}]
+			},
+			{
+				"desc": "The source folder will be continuously monitored for new image and video files, which will be organized from this location. Organized photos will be moved to the destination folder, sorted by date into year/month folders (e.g., 2024/01_Jan/). Leave the destination empty to use /volume1/photo root."
+			}
+		]
+	},
+	{
+		"step_title": "Duplicate Handling",
+		"items": [{
+			"type": "singleselect",
+			"desc": "How to handle duplicate files:",
+			"key": "UI_DELETE_DUPS",
+			"subitems": [{
+				"value": "yes",
+				"desc": "Delete exact duplicates"
+			}, {
+				"value": "no",
+				"desc": "Move duplicates to Duplicates folder"
+			}]
+		}, {
+			"desc": "Exact duplicates (same MD5 hash) will be deleted, or moved to the 'Duplicates' subfolder."
+		}]
+	}
+]
+

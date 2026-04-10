@@ -86,36 +86,65 @@ chmod 755 "$APP_DIR" 2>/dev/null || true
 # Supports both WIZARD_UIFILES format (UI_* variables) and legacy format (wizard_UI_*)
 # WIZARD_UIFILES format (DSM 7+) takes priority, falls back to legacy format if not provided
 
+# Debug: Log all environment variables that might be wizard values
+_log_message "Checking for wizard variables..."
+env | grep -E "^(UI_SRCDIR|UI_DSTDIR|UI_DELETE_DUPS|pkgwizard_|wizard_)" 2>/dev/null | while IFS='=' read -r key value; do
+    _log_message "  Found: $key=$value"
+done || _log_message "  No wizard variables found in environment"
+
 # Photo share root (volume-based path)
 PHOTO_ROOT="/volume1/photo"
 
-# Folder to monitor (relative to PHOTO_ROOT)
+# Folder to monitor
 # Check WIZARD_UIFILES format first (UI_SRCDIR), then legacy format (wizard_UI_SRCDIR), then default
-SRC_SUBDIR="${UI_SRCDIR:-${wizard_UI_SRCDIR:-Photo Organizer}}"
-SRC_SUBDIR="$(echo "$SRC_SUBDIR" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
-if [ -n "$SRC_SUBDIR" ]; then
-	SRC_DIR="${PHOTO_ROOT}/${SRC_SUBDIR}"
+SRC_INPUT="${UI_SRCDIR:-${wizard_UI_SRCDIR:-Photo Organizer}}"
+# Check if full path is provided (starts with /), otherwise treat as subfolder
+if [ "$(echo "$SRC_INPUT" | cut -c1)" = "/" ]; then
+	# Full path provided, use it directly
+	SRC_DIR="$SRC_INPUT"
 else
-	SRC_DIR="${PHOTO_ROOT}"
+	# Subfolder name provided, construct full path
+	SRC_SUBDIR="$(echo "$SRC_INPUT" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
+	if [ -n "$SRC_SUBDIR" ]; then
+		SRC_DIR="${PHOTO_ROOT}/${SRC_SUBDIR}"
+	else
+		SRC_DIR="${PHOTO_ROOT}"
+	fi
 fi
 
-# Destination folder (relative to PHOTO_ROOT)
+# Destination folder
 # Check WIZARD_UIFILES format first (UI_DSTDIR), then legacy format (wizard_UI_DSTDIR), then default
-DST_SUBDIR="${UI_DSTDIR:-${wizard_UI_DSTDIR:-}}"
-DST_SUBDIR="$(echo "$DST_SUBDIR" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
-if [ -n "$DST_SUBDIR" ]; then
-	DEST_DIR="${PHOTO_ROOT}/${DST_SUBDIR}"
+DST_INPUT="${UI_DSTDIR:-${wizard_UI_DSTDIR:-}}"
+# Check if full path is provided (starts with /), otherwise treat as subfolder
+if [ -n "$DST_INPUT" ] && [ "$(echo "$DST_INPUT" | cut -c1)" = "/" ]; then
+	# Full path provided, use it directly
+	DEST_DIR="$DST_INPUT"
 else
-	DEST_DIR="${PHOTO_ROOT}"
+	# Subfolder name provided (or empty), construct full path
+	DST_SUBDIR="$(echo "$DST_INPUT" | sed 's|^/||; s|/$||')"  # trim leading/trailing slashes
+	if [ -n "$DST_SUBDIR" ]; then
+		DEST_DIR="${PHOTO_ROOT}/${DST_SUBDIR}"
+	else
+		DEST_DIR="${PHOTO_ROOT}"
+	fi
 fi
 
 # Duplicate handling
 # Check WIZARD_UIFILES format first (UI_DELETE_DUPS), then legacy format (wizard_UI_DELETE_DUPS), then default
+# Debug: Log wizard values for duplicate handling
+_log_message "Checking wizard values for duplicate handling..."
+[ -n "$UI_DELETE_DUPS" ] && _log_message "  Found UI_DELETE_DUPS: $UI_DELETE_DUPS"
+[ -n "$wizard_UI_DELETE_DUPS" ] && _log_message "  Found wizard_UI_DELETE_DUPS: $wizard_UI_DELETE_DUPS"
+
 DELETE_DUPS_RAW="${UI_DELETE_DUPS:-${wizard_UI_DELETE_DUPS:-yes}}"
+_log_message "  DELETE_DUPS_RAW value: $DELETE_DUPS_RAW"
+
 if [ "$DELETE_DUPS_RAW" = "no" ]; then
 	DELETE_DUPS="false"
+	_log_message "  Setting DELETE_DUPS to false (move duplicates to folder)"
 else
 	DELETE_DUPS="true"
+	_log_message "  Setting DELETE_DUPS to true (delete duplicates)"
 fi
 
 # Create the chosen directories (monitor + destination + Duplicates)
@@ -124,7 +153,22 @@ mkdir -p "$DEST_DIR" 2>/dev/null || true
 mkdir -p "${DEST_DIR}/Duplicates" 2>/dev/null || true
 
 # Persist runtime configuration for the Python service
-CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
+# Always write to standard location: /var/packages/PhotoOrganizer/config.ini
+# This ensures the Python service can always find it (Python looks for this exact path)
+# Always write the config file, even if user selected default values - this ensures the service knows what was configured
+CONFIG_FILE="/var/packages/PhotoOrganizer/config.ini"
+
+# Ensure the directory exists
+mkdir -p "/var/packages/PhotoOrganizer" 2>/dev/null || {
+	_log_message "WARNING: Cannot create /var/packages/PhotoOrganizer directory, trying alternative location"
+	CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
+	mkdir -p "$(dirname "$CONFIG_FILE")" 2>/dev/null || {
+		_log_message "ERROR: Cannot create config directory at $CONFIG_FILE"
+	}
+}
+
+# Write configuration file (always write, even with default values from wizard)
+# This file should always exist so the service knows what was configured during installation
 {
 	echo "[paths]"
 	echo "source_dir=$SRC_DIR"
@@ -132,7 +176,15 @@ CONFIG_FILE="$PACKAGE_VAR_DIR/config.ini"
 	echo ""
 	echo "[duplicates]"
 	echo "delete=$DELETE_DUPS"
-} > "$CONFIG_FILE" 2>/dev/null || true
+} > "$CONFIG_FILE" 2>/dev/null
+
+# Check if write was successful
+if [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ]; then
+	_log_message "Configuration written to $CONFIG_FILE: source_dir=$SRC_DIR, destination_root=$DEST_DIR, delete_duplicates=$DELETE_DUPS"
+else
+	_log_message "ERROR: Failed to write configuration file to $CONFIG_FILE (file missing or empty)"
+	_log_message "  Attempted to write: source_dir=$SRC_DIR, destination_root=$DEST_DIR, delete_duplicates=$DELETE_DUPS"
+fi
 
     PACKAGE_USER="PhotoOrganizer"
 
@@ -247,7 +299,17 @@ _log_message "Package version: $PACKAGE_VERSION | Python: $PYTHON_VER"
 _log_message "Dependencies installed: Pillow $PILLOW_VER, Watchdog $WATCHDOG_VER, ImageHash $IMAGEHASH_VER, Mutagen $MUTAGEN_VER"
 _log_message "Source directory: $SRC_DIR | Destination directory: $DEST_DIR | Delete duplicates: $DELETE_DUPS"
 #_log_message "Installation path: $APP_DIR | Virtual environment: $VENV_DIR"
+
+# Verify config file was written correctly
+if [ -f "$CONFIG_FILE" ]; then
+	_log_message "Configuration file verified: $CONFIG_FILE"
+	_log_message "Config contents: $(cat "$CONFIG_FILE" 2>/dev/null | tr '\n' '; ' || echo 'Unable to read')"
+else
+	_log_message "WARNING: Configuration file not found at $CONFIG_FILE"
+fi
+
 _log_message "Installation completed successfully"
+_log_message "NOTE: If the service is running, restart it to load the new configuration"
 
 exit 0
 

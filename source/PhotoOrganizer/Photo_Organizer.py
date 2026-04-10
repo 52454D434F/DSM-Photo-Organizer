@@ -93,17 +93,15 @@ def load_runtime_config():
 
     config_paths = []
     if is_synology_nas():
-        # Primary location: /var/packages/PhotoOrganizer (PACKAGE_VAR_DIR in postinst)
-        config_paths = [
-            "/var/packages/PhotoOrganizer/config.ini",
-            "/var/packages/PhotoOrganizer/var/config.ini",
-            "/volume1/@appstore/PhotoOrganizer/var/config.ini",
-        ]
+        # Standard location: /var/packages/PhotoOrganizer/config.ini
+        config_paths = ["/var/packages/PhotoOrganizer/config.ini"]
     else:
         # For local testing on Windows/Linux, allow a config.ini next to the script
         config_paths = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")]
 
     parser = configparser.ConfigParser()
+    config_loaded = False
+    delete_str = "default"
 
     for path in config_paths:
         if not os.path.exists(path):
@@ -123,10 +121,25 @@ def load_runtime_config():
             if parser.has_section("duplicates"):
                 delete_str = parser.get("duplicates", "delete", fallback="true").strip().lower()
                 DELETE_DUPLICATES = delete_str in ("1", "true", "yes", "y")
+                print(f"Loaded duplicate policy from config: delete={delete_str}, DELETE_DUPLICATES={DELETE_DUPLICATES}")
 
+            # Log all config values to application log
+            log_system_event("Info", f"Configuration loaded from: {path}")
+            log_system_event("Info", f"  Source directory: {SOURCE_DIR}")
+            log_system_event("Info", f"  Destination directory: {DEST_DIR}")
+            log_system_event("Info", f"  Delete duplicates: {DELETE_DUPLICATES} (config value: {delete_str})")
+
+            config_loaded = True
             break  # Successfully loaded a config, no need to try other paths
         except Exception as e:
             print(f"Warning: Error reading config file {path}: {e}")
+    
+    # Log if no config file was found (using defaults)
+    if not config_loaded:
+        log_system_event("Info", "No configuration file found, using default values")
+        log_system_event("Info", f"  Source directory: {SOURCE_DIR} (default)")
+        log_system_event("Info", f"  Destination directory: {DEST_DIR} (default)")
+        log_system_event("Info", f"  Delete duplicates: {DELETE_DUPLICATES} (default)")
     
     # Initialize statistics file path and load statistics after DEST_DIR is set
     initialize_statistics_file()
@@ -985,6 +998,18 @@ def calculate_md5(file_path):
         print(f"Error calculating MD5 for {file_path}: {e}")
         return None
 
+def duplicates_folder_for_destination(dest_folder):
+    """Return Duplicates path mirroring dest_folder under DEST_DIR.
+    
+    E.g. DEST/2024/08_Aug -> DEST/Duplicates/2024/08_Aug
+    DEST/No Date Found -> DEST/Duplicates/No Date Found
+    """
+    rel = os.path.relpath(os.path.abspath(dest_folder), os.path.abspath(DEST_DIR))
+    if rel in (os.curdir, "."):
+        return os.path.normpath(os.path.join(DEST_DIR, "Duplicates"))
+    return os.path.normpath(os.path.join(DEST_DIR, "Duplicates", rel))
+
+
 def check_duplicate_md5_in_folder(file_path, folder_path):
     """Check if a file with the same MD5 hash already exists in the specified folder.
     
@@ -1242,6 +1267,7 @@ def process_photo(file_path):
     is_image = is_image_file(file_path)
     
     # If file is neither image nor video, move to Unknown File Types folder
+    # Note: Unknown File Types folder is only created here when actually needed (lazy creation)
     if not is_video and not is_image:
         unknown_folder = os.path.join(DEST_DIR, 'Unknown File Types')
         ensure_dir(unknown_folder)
@@ -1271,8 +1297,8 @@ def process_photo(file_path):
                                 save_statistics_if_needed()
                                 update_synology_indexer(old_path=file_path, new_path=None)
                             else:
-                                # Keep duplicate with unique name
-                                duplicates_folder = os.path.join(unknown_folder, 'Duplicates')
+                                # Keep duplicate with unique name (mirror Unknown File Types under Duplicates)
+                                duplicates_folder = duplicates_folder_for_destination(unknown_folder)
                                 ensure_dir(duplicates_folder)
                                 unique_name = get_unique_duplicate_filename(duplicates_folder, original_filename)
                                 duplicates_path = os.path.join(duplicates_folder, unique_name)
@@ -1343,10 +1369,12 @@ def process_photo(file_path):
         dest_folder = os.path.join(DEST_DIR, year, month_folder)
         dest_filename = new_filename
     else:
-        # No date found, keep original filename and move to NoDateFound
-        dest_folder = os.path.join(DEST_DIR, 'NoDateFound')
+        # No date found, keep original filename and move to No Date Found
+        # Note: No Date Found folder is only created here when actually needed (lazy creation)
+        dest_folder = os.path.join(DEST_DIR, 'No Date Found')
         dest_filename = original_filename
     
+    # Ensure destination folder exists (creates No Date Found only when dest_folder points to it)
     ensure_dir(dest_folder)
     dest_path = os.path.join(dest_folder, dest_filename)
     
@@ -1387,7 +1415,7 @@ def process_photo(file_path):
                     update_synology_indexer(old_path=file_path, new_path=None)
                 else:
                     # Keep duplicates: move to Duplicates folder instead of deleting
-                    duplicates_folder = os.path.join(DEST_DIR, 'Duplicates')
+                    duplicates_folder = duplicates_folder_for_destination(dest_folder)
                     ensure_dir(duplicates_folder)
                     # Use the destination filename (without subseconds) as base for duplicates
                     unique_name = get_unique_duplicate_filename(duplicates_folder, dest_filename, media_datetime)
@@ -1431,8 +1459,8 @@ def process_photo(file_path):
                 file_name = dest_filename
                 event_info = "Unable to get modification times"
             
-            # Move the modified file to Duplicates folder
-            duplicates_folder = os.path.join(DEST_DIR, 'Duplicates')
+            # Move the modified file to Duplicates folder (same YYYY/MM_Mmm tree as destination)
+            duplicates_folder = duplicates_folder_for_destination(dest_folder)
             ensure_dir(duplicates_folder)
             
             # Check if a file with the same MD5 hash already exists in Duplicates folder
@@ -1733,9 +1761,9 @@ class PhotoHandler(FileSystemEventHandler):
 
             try:
                 file_size = os.path.getsize(event.src_path)
-                log_file_event("File Detected", event.src_path, None, file_size, "File detected")
+                log_file_event("New File", event.src_path, None, file_size, "Detected")
             except Exception:
-                log_file_event("File Detected", event.src_path, None, None, "New file detected")
+                log_file_event("New File", event.src_path, None, None, "Detected")
             process_photo(event.src_path)
     
     def on_moved(self, event):
